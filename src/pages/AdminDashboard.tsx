@@ -177,7 +177,7 @@ const AdminDashboard = () => {
         .from("game_rooms")
         .select("id, room_code, room_name, status, created_at, current_question_index")
         .eq("host_id", user.id)
-        .in("status", ["waiting", "playing"])
+        .in("status", ["waiting", "playing", "paused"])
         .order("created_at", { ascending: false });
 
       setActiveRooms(rooms || []);
@@ -722,6 +722,23 @@ const AdminDashboard = () => {
       toast.error("הוסף שאלות לפני תחילת המשחק");
       return;
     }
+
+    const { data: validation, error: validationError } = await supabase.rpc("validate_game_before_start", {
+      _room_id: roomId,
+    });
+    if (validationError) {
+      toast.error("לא ניתן לבדוק את המשחק לפני התחלה");
+      return;
+    }
+    if (!validation?.ok) {
+      const errors = Array.isArray(validation.errors) ? validation.errors : [];
+      toast.error(errors.length ? errors.join(" • ") : "יש לתקן את המשחק לפני ההתחלה");
+      return;
+    }
+    const warnings = Array.isArray(validation.warnings) ? validation.warnings : [];
+    if (warnings.length && !confirm(`אזהרות לפני התחלה:\n\n${warnings.join("\n")}\n\nלהתחיל בכל זאת?`)) {
+      return;
+    }
     
     if (mode === "player" && user) {
       // Do not update score/presence directly from the browser.
@@ -821,6 +838,22 @@ const AdminDashboard = () => {
                       </div>
                     </div>
                     <div className="flex gap-2 mr-3">
+                      {(room.status === "playing" || room.status === "paused") && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={async () => {
+                            const { error } = await supabase.rpc("recover_game_room", { _room_id: room.id });
+                            if (error) { toast.error("לא ניתן לשחזר את המשחק"); return; }
+                            toast.success("המשחק שוחזר");
+                            window.history.replaceState(null, "", `/admin?room=${room.id}`);
+                            window.location.reload();
+                          }}
+                          className="text-primary hover:text-primary"
+                        >
+                          המשך
+                        </Button>
+                      )}
                       {room.status === "playing" && (
                         <Button
                           variant="ghost"
