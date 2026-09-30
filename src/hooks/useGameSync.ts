@@ -268,7 +268,7 @@ export function useGameSync(roomId: string | null) {
 
     const interval = window.setInterval(resyncRoom, 5000);
     const heartbeat = window.setInterval(() => {
-      if (roomId && user?.id) void supabase.rpc("host_heartbeat", { _room_id: roomId });
+      if (roomId && user?.id) void supabase.rpc("host_heartbeat" as any, { _room_id: roomId });
     }, 15000);
 
     window.addEventListener("focus", resyncRoom);
