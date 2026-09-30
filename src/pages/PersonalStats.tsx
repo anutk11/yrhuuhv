@@ -15,7 +15,7 @@ const PersonalStats = () => {
   useEffect(() => {
     if (!user) return;
     (async () => {
-      const { data, error } = await supabase.rpc("get_personal_game_stats", { _user_id: user.id });
+      const { data, error } = await supabase.rpc("get_personal_game_stats" as any, { _user_id: user.id });
       if (error) toast.error("לא ניתן לטעון את הסטטיסטיקות");
       else setStats(data?.[0] || null);
       setLoading(false);
