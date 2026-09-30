@@ -80,6 +80,14 @@ const App = () => (
               }
             />
             <Route
+              path="/history"
+              element={
+                <ProtectedRoute>
+                  <GameHistory />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/admin/history"
               element={
                 <ProtectedRoute adminOnly>
