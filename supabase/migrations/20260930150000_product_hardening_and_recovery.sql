@@ -318,21 +318,35 @@ BEGIN
   IF auth.uid() IS NULL OR (_user_id<>auth.uid() AND NOT public.has_role(auth.uid(),'admin')) THEN
     RAISE EXCEPTION 'Not allowed';
   END IF;
+
   RETURN QUERY
+  WITH my_games AS (
+    SELECT h.id,h.host_id,
+      COALESCE((
+        SELECT (r.value->>'score')::integer
+        FROM jsonb_array_elements(COALESCE(h.rankings,'[]'::jsonb)) r(value)
+        WHERE (r.value->>'user_id')::uuid=_user_id
+        LIMIT 1
+      ),0)::bigint AS score
+    FROM public.game_history h
+    WHERE public.can_view_game_history(h.id,_user_id)
+  ),
+  answer_stats AS (
+    SELECT COUNT(*)::bigint AS total_answers,
+           COUNT(*) FILTER (WHERE a.is_correct)::bigint AS total_correct
+    FROM public.game_history_answers a
+    JOIN my_games g ON g.id=a.history_id
+    WHERE a.user_id=_user_id
+  )
   SELECT
-    COUNT(*) FILTER (WHERE public.can_view_game_history(h.id, _user_id))::bigint,
-    COUNT(*) FILTER (WHERE h.host_id=_user_id)::bigint,
-    COALESCE(SUM(COALESCE((r.value->>'score')::integer,0)),0)::bigint,
-    COALESCE(AVG((r.value->>'score')::numeric),0)::numeric,
-    COALESCE(SUM(CASE WHEN a.is_correct THEN 1 ELSE 0 END),0)::bigint,
-    COALESCE(COUNT(a.*),0)::bigint,
-    COALESCE(MAX((r.value->>'score')::integer),0)::bigint
-  FROM public.game_history h
-  LEFT JOIN LATERAL jsonb_array_elements(COALESCE(h.rankings,'[]'::jsonb)) r(value)
-    ON (r.value->>'user_id')::uuid=_user_id
-  LEFT JOIN public.game_history_answers a
-    ON a.history_id=h.id AND a.user_id=_user_id
-  WHERE public.can_view_game_history(h.id,_user_id);
+    COUNT(*)::bigint,
+    COUNT(*) FILTER (WHERE host_id=_user_id)::bigint,
+    COALESCE(SUM(score),0)::bigint,
+    COALESCE(AVG(score),0)::numeric,
+    (SELECT total_correct FROM answer_stats),
+    (SELECT total_answers FROM answer_stats),
+    COALESCE(MAX(score),0)::bigint
+  FROM my_games;
 END;
 $$;
 REVOKE ALL ON FUNCTION public.get_personal_game_stats(uuid) FROM PUBLIC,anon;
