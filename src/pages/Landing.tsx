@@ -77,6 +77,12 @@ const Landing = () => {
                   <BarChart3 className="w-5 h-5" />
                   היסטוריית משחקים
                 </Button>
+                {isAdmin && (
+                  <Button variant="secondary" size="lg" className="flex-1 sm:flex-initial text-base px-6 py-5" onClick={() => navigate("/admin/management")}>
+                    <Users className="w-5 h-5" />
+                    ניהול מערכת
+                  </Button>
+                )}
               </div>
             </>
           ) : (
