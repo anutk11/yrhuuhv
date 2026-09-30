@@ -1,0 +1,1 @@
+CREATE POLICY "Host can delete room players" ON public.room_players FOR DELETE TO authenticated USING (EXISTS (SELECT 1 FROM game_rooms WHERE game_rooms.id = room_players.room_id AND game_rooms.host_id = auth.uid()));

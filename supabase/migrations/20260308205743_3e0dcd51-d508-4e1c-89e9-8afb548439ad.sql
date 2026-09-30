@@ -1,0 +1,1 @@
+ALTER TABLE public.game_rooms ADD COLUMN room_name text NOT NULL DEFAULT 'משחק חדש';
