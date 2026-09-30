@@ -239,11 +239,12 @@ const QuestionBank = () => {
     setQuestions(qs);
   };
 
+  const scopedQuestions: BankQuestion[] = questions.filter((q) => bankView === "all" || q.bank_scope === bankView);
   const folderPaths = [...new Set([
     ...persistedFolders,
     ...scopedQuestions.map((q) => q.folder),
   ])];
-  const folderTree = buildFolderTree(folderPaths, questions);
+  const folderTree = buildFolderTree(folderPaths, scopedQuestions);
   const allCategories = [...new Set(scopedQuestions.map((q) => q.category))].sort((a, b) => a.localeCompare(b, "he"));
 
   const handleMediaUpload = async (file: File) => {
@@ -534,7 +535,7 @@ const QuestionBank = () => {
   };
 
   /* ─── Filtered questions ─── */
-  const filtered = questions.filter((q) => {
+  const filtered = scopedQuestions.filter((q) => {
     const matchFolder = selectedFolder === "הכל" || q.folder === selectedFolder || q.folder.startsWith(selectedFolder + SEPARATOR);
     const matchCategory = selectedCategory === "הכל" || q.category === selectedCategory;
     const matchSearch = !searchText || q.question_text.includes(searchText);
