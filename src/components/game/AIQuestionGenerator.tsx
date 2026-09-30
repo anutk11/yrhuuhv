@@ -65,6 +65,9 @@ const AIQuestionGenerator = ({ open, onOpenChange, folders, categories, defaultF
       .filter((q) => q.question_text.trim() && q.options.every((o) => o.trim()))
       .map((q) => ({
         created_by: user.id,
+        owner_id: user.id,
+        bank_scope: "private",
+        source_question_id: null,
         question_text: q.question_text.trim(),
         options: q.options.map((o) => o.trim()),
         correct_index: q.correct_index,
