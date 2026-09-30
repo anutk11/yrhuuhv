@@ -17,6 +17,8 @@ import QuestionBank from "./pages/QuestionBank";
 import TelephoneHost from "./pages/TelephoneHost";
 import GameHistory from "./pages/GameHistory";
 import AdminManagement from "./pages/AdminManagement";
+import PersonalStats from "./pages/PersonalStats";
+import Practice from "./pages/Practice";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -109,6 +111,22 @@ const App = () => (
               element={
                 <ProtectedRoute adminOnly>
                   <GameHistory />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/stats"
+              element={
+                <ProtectedRoute>
+                  <PersonalStats />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/practice"
+              element={
+                <ProtectedRoute>
+                  <Practice />
                 </ProtectedRoute>
               }
             />
