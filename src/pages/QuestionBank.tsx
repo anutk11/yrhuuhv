@@ -41,6 +41,10 @@ interface FolderNode {
   children: FolderNode[];
   questionCount: number;
 }
+interface PersistedFolder {
+  path: string;
+  scope: "private" | "central";
+}
 
 const SEPARATOR = "/";
 
@@ -172,7 +176,7 @@ const QuestionBank = () => {
   const navigate = useNavigate();
   const { user, isAdmin } = useAuth();
   const [questions, setQuestions] = useState<BankQuestion[]>([]);
-  const [persistedFolders, setPersistedFolders] = useState<string[]>([]);
+  const [persistedFolders, setPersistedFolders] = useState<PersistedFolder[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<string>("הכל");
   const [selectedCategory, setSelectedCategory] = useState<string>("הכל");
   const [searchText, setSearchText] = useState("");
@@ -210,7 +214,12 @@ const QuestionBank = () => {
 
   const loadPersistedFolders = async () => {
     const { data } = await supabase.from("question_folders").select("path").order("path");
-    if (data) setPersistedFolders(data.map((row) => row.path).filter(Boolean));
+    if (data) {
+      setPersistedFolders(data.map((row) => ({
+        path: row.path,
+        scope: row.scope === "central" ? "central" : "private",
+      })).filter((row) => row.path));
+    }
   };
 
   const loadQuestions = async () => {
@@ -240,8 +249,11 @@ const QuestionBank = () => {
   };
 
   const scopedQuestions: BankQuestion[] = questions.filter((q) => bankView === "all" || q.bank_scope === bankView);
+  const visiblePersistedFolders = persistedFolders
+    .filter((folder) => bankView === "all" || folder.scope === bankView)
+    .map((folder) => folder.path);
   const folderPaths = [...new Set([
-    ...persistedFolders,
+    ...visiblePersistedFolders,
     ...scopedQuestions.map((q) => q.folder),
   ])];
   const folderTree = buildFolderTree(folderPaths, scopedQuestions);
@@ -404,14 +416,18 @@ const QuestionBank = () => {
     if (!newFolderName.trim() || !user) return;
     const name = newFolderName.trim();
     const fullPath = parentForNewFolder ? parentForNewFolder + SEPARATOR + name : name;
+    const scope = bankView === "central" && isAdmin ? "central" : "private";
+    const ownerId = scope === "central" ? null : user.id;
     void supabase.from("question_folders")
-      .insert({ path: fullPath, created_by: user.id, owner_id: user.id, scope: "private" } as any)
+      .insert({ path: fullPath, created_by: user.id, owner_id: ownerId, scope } as any)
       .then(({ error }) => {
         if (error) {
           toast.error("שגיאה ביצירת התיקייה");
           return;
         }
-        setPersistedFolders((prev) => prev.includes(fullPath) ? prev : [...prev, fullPath]);
+        setPersistedFolders((prev) => prev.some((folder) => folder.path === fullPath && folder.scope === scope)
+          ? prev
+          : [...prev, { path: fullPath, scope }]);
         setSelectedFolder(fullPath);
         toast.success(`התיקייה "${name}" נוצרה`);
       });
@@ -428,19 +444,20 @@ const QuestionBank = () => {
       toast.error("אי אפשר למחוק תיקייה מהמאגר המרכזי");
       return;
     }
-    const affectedQuestions = questions.filter((q) => paths.includes(q.folder) && (isAdmin || q.bank_scope === "private"));
+    const deletingScope = bankView === "central" && isAdmin ? "central" : "private";
+    const affectedQuestions = questions.filter((q) => paths.includes(q.folder) && q.bank_scope === deletingScope);
     if (affectedQuestions.length > 0) {
       const { error } = await supabase.from("question_bank").delete().in("id", affectedQuestions.map((q) => q.id));
       if (error) { toast.error("שגיאה במחיקת התיקייה"); return; }
     }
-    const { error: folderError } = await supabase.from("question_folders").delete().in("path", paths);
+    const { error: folderError } = await supabase.from("question_folders").delete().in("path", paths).eq("scope", deletingScope);
     if (folderError) {
       toast.error("שגיאה במחיקת התיקייה");
       return;
     }
     toast.success(`התיקייה "${deletingFolder.name}" ו-${affectedQuestions.length} שאלות נמחקו`);
     if (paths.includes(selectedFolder)) setSelectedFolder("הכל");
-    setPersistedFolders((prev) => prev.filter((p) => !paths.includes(p)));
+    setPersistedFolders((prev) => prev.filter((folder) => !(paths.includes(folder.path) && folder.scope === deletingScope)));
     setDeletingFolder(null);
     void loadQuestions();
   };
