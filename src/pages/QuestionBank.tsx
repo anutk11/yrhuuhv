@@ -230,7 +230,7 @@ const QuestionBank = () => {
 
   const loadFavorites = async () => {
     if (!user) return;
-    const { data } = await supabase.from("question_bank_favorites").select("question_id").eq("user_id", user.id);
+    const { data } = await supabase.from("question_bank_favorites" as any).select("question_id").eq("user_id", user.id);
     setFavoriteIds(new Set((data || []).map((row: any) => row.question_id)));
   };
 
