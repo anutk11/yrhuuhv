@@ -29,6 +29,9 @@ interface BankQuestion {
   media_type?: string | null;
   image_view_time: number;
   keep_image: boolean;
+  bank_scope: "private" | "central";
+  owner_id: string | null;
+  source_question_id?: string | null;
 }
 
 /* ─── Folder tree helpers ─── */
@@ -167,12 +170,13 @@ const FolderTreeItem = ({
 /* ─── Main Component ─── */
 const QuestionBank = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [questions, setQuestions] = useState<BankQuestion[]>([]);
   const [persistedFolders, setPersistedFolders] = useState<string[]>([]);
   const [selectedFolder, setSelectedFolder] = useState<string>("הכל");
   const [selectedCategory, setSelectedCategory] = useState<string>("הכל");
   const [searchText, setSearchText] = useState("");
+  const [bankView, setBankView] = useState<"all" | "private" | "central">("all");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
@@ -229,16 +233,18 @@ const QuestionBank = () => {
       ...q,
       options: (q.options as string[]) || [],
       folder: q.folder || "כללי",
+      bank_scope: q.bank_scope === "central" ? "central" : "private",
+      owner_id: q.owner_id || null,
     }));
     setQuestions(qs);
   };
 
   const folderPaths = [...new Set([
     ...persistedFolders,
-    ...questions.map((q) => q.folder),
+    ...scopedQuestions.map((q) => q.folder),
   ])];
   const folderTree = buildFolderTree(folderPaths, questions);
-  const allCategories = [...new Set(questions.map((q) => q.category))].sort((a, b) => a.localeCompare(b, "he"));
+  const allCategories = [...new Set(scopedQuestions.map((q) => q.category))].sort((a, b) => a.localeCompare(b, "he"));
 
   const handleMediaUpload = async (file: File) => {
     setUploading(true);
@@ -267,6 +273,9 @@ const QuestionBank = () => {
       image_view_time: newQ.image_view_time,
       keep_image: newQ.keep_image,
       created_by: user.id,
+      bank_scope: "private",
+      owner_id: user.id,
+      source_question_id: null,
     };
     if (editingId) {
       const { created_by, ...updatePayload } = payload;
@@ -285,9 +294,19 @@ const QuestionBank = () => {
   };
 
   const deleteQuestion = async (id: string) => {
+    const q = questions.find((item) => item.id === id);
+    if (!q) return;
+    if (q.bank_scope === "central" && !isAdmin) {
+      toast.error("רק מנהל יכול למחוק שאלה מהמאגר המרכזי");
+      return;
+    }
     if (!confirm("למחוק שאלה זו מהמאגר?")) return;
-    await supabase.from("question_bank").delete().eq("id", id);
-    setQuestions((prev) => prev.filter((q) => q.id !== id));
+    const { error } = await supabase.from("question_bank").delete().eq("id", id);
+    if (error) {
+      toast.error("שגיאה במחיקת השאלה");
+      return;
+    }
+    setQuestions((prev) => prev.filter((item) => item.id !== id));
     toast.success("השאלה נמחקה");
   };
 
@@ -295,6 +314,9 @@ const QuestionBank = () => {
     if (!user) return;
     const { error } = await supabase.from("question_bank").insert({
       created_by: user.id,
+      owner_id: user.id,
+      bank_scope: "private",
+      source_question_id: q.bank_scope === "central" ? q.id : (q.source_question_id || null),
       question_text: q.question_text,
       options: q.options,
       correct_index: q.correct_index,
@@ -313,6 +335,10 @@ const QuestionBank = () => {
   };
 
   const startEditing = (q: BankQuestion) => {
+    if (q.bank_scope === "central" && !isAdmin) {
+      toast.error("שאלות במאגר המרכזי ניתנות לעריכה רק למנהל");
+      return;
+    }
     setNewQ({
       question_text: q.question_text,
       options: [...q.options],
@@ -344,7 +370,7 @@ const QuestionBank = () => {
     const name = newFolderName.trim();
     const fullPath = parentForNewFolder ? parentForNewFolder + SEPARATOR + name : name;
     void supabase.from("question_folders")
-      .upsert({ path: fullPath, created_by: user.id }, { onConflict: "path" })
+      .insert({ path: fullPath, created_by: user.id, owner_id: user.id, scope: "private" })
       .then(({ error }) => {
         if (error) {
           toast.error("שגיאה ביצירת התיקייה");
@@ -363,7 +389,11 @@ const QuestionBank = () => {
   const confirmDeleteFolder = async () => {
     if (!deletingFolder) return;
     const paths = getAllDescendantPaths(deletingFolder);
-    const affectedQuestions = questions.filter((q) => paths.includes(q.folder));
+    if (!isAdmin && bankView === "central") {
+      toast.error("אי אפשר למחוק תיקייה מהמאגר המרכזי");
+      return;
+    }
+    const affectedQuestions = questions.filter((q) => paths.includes(q.folder) && (isAdmin || q.bank_scope === "private"));
     if (affectedQuestions.length > 0) {
       const { error } = await supabase.from("question_bank").delete().in("id", affectedQuestions.map((q) => q.id));
       if (error) { toast.error("שגיאה במחיקת התיקייה"); return; }
@@ -508,6 +538,21 @@ const QuestionBank = () => {
     <div className="min-h-screen gradient-hero" dir="rtl">
       <div className="max-w-6xl mx-auto px-4 py-8">
         {/* Header */}
+        <div className="flex items-center gap-2 mb-5">
+          {([
+            ["all", "כל השאלות"],
+            ["private", "המאגר שלי"],
+            ["central", "המאגר המרכזי"],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => { setBankView(value); setSelectedFolder("הכל"); setSelectedCategory("הכל"); }}
+              className={`px-4 py-2 rounded-xl text-sm font-display border transition-colors ${bankView === value ? "bg-primary text-primary-foreground border-primary" : "bg-secondary text-muted-foreground border-border hover:text-foreground"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>}
         <div className="flex items-center justify-between mb-8">
           <button onClick={() => navigate("/")} className="text-muted-foreground hover:text-foreground flex items-center gap-2 text-sm">
             <ArrowLeft className="w-4 h-4" />
@@ -525,11 +570,11 @@ const QuestionBank = () => {
             <input ref={csvInputRef} type="file" accept=".csv" className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) handleCsvImport(f); e.target.value = ""; }}
             />
-            <Button variant="neon-outline" size="sm" onClick={() => setShowAI(true)}>
+            <Button variant="neon-outline" size="sm" onClick={() => setShowAI(true)} disabled={bankView === "central" && !isAdmin}>
               <Sparkles className="w-4 h-4" />
               מחולל AI
             </Button>
-            <Button variant="neon" size="sm" onClick={() => { setEditingId(null); resetForm(); setShowForm(true); }}>
+            <Button variant="neon" size="sm" onClick={() => { setEditingId(null); resetForm(); setShowForm(true); }} disabled={bankView === "central" && !isAdmin}>
               <Plus className="w-4 h-4" />
               שאלה חדשה
             </Button>
@@ -548,7 +593,7 @@ const QuestionBank = () => {
             >
               <BookOpen className="w-3.5 h-3.5" />
               <span className="flex-1">הכל</span>
-              <span className="text-[10px] opacity-60">{questions.length}</span>
+              <span className="text-[10px] opacity-60">{scopedQuestions.length}</span>
             </div>
 
             {folderTree.map((node) => (
@@ -786,11 +831,16 @@ const QuestionBank = () => {
                         </span>
                         <span className="text-[10px] text-muted-foreground">{q.category}</span>
                         <span className="text-[10px] text-muted-foreground">{q.time_limit} שנ׳</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${q.bank_scope === "central" ? "bg-amber-500/15 text-amber-300" : "bg-primary/10 text-primary"}`}>{q.bank_scope === "central" ? "מרכזי" : "שלי"}</span>
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => duplicateBankQuestion(q)} className="text-muted-foreground hover:text-primary p-1" title="שכפל"><Copy className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => startEditing(q)} className="text-muted-foreground hover:text-primary p-1"><Edit2 className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => deleteQuestion(q.id)} className="text-muted-foreground hover:text-destructive p-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => duplicateBankQuestion(q)} className="text-muted-foreground hover:text-primary p-1" title={q.bank_scope === "central" ? "העתק למאגר שלי" : "שכפל"}><Copy className="w-3.5 h-3.5" /></button>
+                        {(q.bank_scope === "private" || isAdmin) && (
+                          <>
+                            <button onClick={() => startEditing(q)} className="text-muted-foreground hover:text-primary p-1" title="ערוך"><Edit2 className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => deleteQuestion(q.id)} className="text-muted-foreground hover:text-destructive p-1" title="מחק"><Trash2 className="w-3.5 h-3.5" /></button>
+                          </>
+                        )}
                       </div>
                     </div>
                     <p className="text-foreground font-medium mb-2">{q.question_text}</p>
