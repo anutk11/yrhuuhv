@@ -12,6 +12,13 @@ import { toast } from "sonner";
 import Papa from "papaparse";
 import AIQuestionGenerator from "@/components/game/AIQuestionGenerator";
 import {
+  PRIVATE_BANK_MEDIA_BUCKET,
+  PUBLIC_GAME_MEDIA_BUCKET,
+  copyPrivateBankMedia,
+  fileExtension,
+  signPrivateBankMedia,
+} from "@/lib/questionMedia";
+import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
@@ -32,6 +39,7 @@ interface BankQuestion {
   bank_scope: "private" | "central";
   owner_id: string | null;
   source_question_id?: string | null;
+  media_path?: string | null;
 }
 
 /* ─── Folder tree helpers ─── */
@@ -202,6 +210,7 @@ const QuestionBank = () => {
     category: "כללי",
     folder: "כללי",
     media_url: "" as string,
+    media_path: "" as string,
     media_type: "none" as string,
     image_view_time: 5,
     keep_image: false,
@@ -238,13 +247,15 @@ const QuestionBank = () => {
       if (data.length < pageSize) break;
       from += pageSize;
     }
-    const qs = allData.map((q: any) => ({
+    const qs = await Promise.all(allData.map(async (q: any) => ({
       ...q,
       options: (q.options as string[]) || [],
       folder: q.folder || "כללי",
       bank_scope: q.bank_scope === "central" ? "central" : "private",
       owner_id: q.owner_id || null,
-    }));
+      media_url: q.media_path ? await signPrivateBankMedia(q.media_path) : q.media_url || null,
+      media_path: q.media_path || null,
+    })));
     setQuestions(qs);
   };
 
@@ -260,14 +271,39 @@ const QuestionBank = () => {
   const allCategories = [...new Set(scopedQuestions.map((q) => q.category))].sort((a, b) => a.localeCompare(b, "he"));
 
   const handleMediaUpload = async (file: File) => {
+    if (!user) return;
     setUploading(true);
-    const ext = file.name.split(".").pop();
-    const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
-    const { error } = await supabase.storage.from("question-media").upload(path, file);
-    if (error) { toast.error("שגיאה בהעלאת קובץ"); setUploading(false); return; }
-    const { data: urlData } = supabase.storage.from("question-media").getPublicUrl(path);
+    const ext = file.name.split(".").pop() || "bin";
     const isVideo = file.type.startsWith("video/");
-    setNewQ((p) => ({ ...p, media_url: urlData.publicUrl, media_type: isVideo ? "video" : "image" }));
+    const isCentralUpload = bankView === "central" && isAdmin;
+    const bucket = isCentralUpload ? PUBLIC_GAME_MEDIA_BUCKET : PRIVATE_BANK_MEDIA_BUCKET;
+    const path = isCentralUpload
+      ? `central/${crypto.randomUUID()}.${ext}`
+      : `${user.id}/${crypto.randomUUID()}.${ext}`;
+
+    const { error } = await supabase.storage.from(bucket).upload(path, file);
+    if (error) {
+      toast.error("שגיאה בהעלאת קובץ");
+      setUploading(false);
+      return;
+    }
+
+    const mediaUrl = isCentralUpload
+      ? supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
+      : await signPrivateBankMedia(path);
+
+    if (!mediaUrl) {
+      toast.error("לא ניתן להכין קישור למדיה");
+      setUploading(false);
+      return;
+    }
+
+    setNewQ((p) => ({
+      ...p,
+      media_url: mediaUrl,
+      media_path: isCentralUpload ? "" : path,
+      media_type: isVideo ? "video" : "image",
+    }));
     setUploading(false);
   };
 
@@ -288,7 +324,8 @@ const QuestionBank = () => {
       time_limit: newQ.time_limit,
       category: newQ.category,
       folder: newQ.folder,
-      media_url: newQ.media_url || null,
+      media_url: newQ.media_path ? null : (newQ.media_url || null),
+      media_path: newQ.media_path || null,
       media_type: newQ.media_type || "none",
       image_view_time: newQ.image_view_time,
       keep_image: newQ.keep_image,
@@ -395,6 +432,7 @@ const QuestionBank = () => {
       category: q.category,
       folder: q.folder,
       media_url: q.media_url || "",
+      media_path: q.media_path || "",
       media_type: q.media_type || "none",
       image_view_time: q.image_view_time ?? 5,
       keep_image: q.keep_image ?? false,
@@ -408,7 +446,7 @@ const QuestionBank = () => {
       question_text: "", options: ["", "", "", ""], correct_index: 0,
       question_type: "trivia", time_limit: 15, category: "כללי",
       folder: selectedFolder === "הכל" ? "כללי" : selectedFolder,
-      media_url: "", media_type: "none", image_view_time: 5, keep_image: false,
+      media_url: "", media_path: "", media_type: "none", image_view_time: 5, keep_image: false,
     });
   };
 
@@ -800,7 +838,7 @@ const QuestionBank = () => {
                             </div>
                           )}
                           <span className="text-xs text-foreground flex-1 truncate">{newQ.media_type === "image" ? "תמונה" : "סרטון"}</span>
-                          <button onClick={() => setNewQ((p) => ({ ...p, media_url: "", media_type: "none" }))} className="text-destructive">
+                          <button onClick={() => setNewQ((p) => ({ ...p, media_url: "", media_path: "", media_type: "none" }))} className="text-destructive">
                             <X className="w-4 h-4" />
                           </button>
                         </div>
