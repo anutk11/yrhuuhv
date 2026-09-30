@@ -34,11 +34,10 @@ const ConnectedPlayers = ({ roomId, canRemove = false }: ConnectedPlayersProps) 
       }
       if (!rps) return;
 
-      const userIds = rps.map((p) => p.user_id);
       const { data: profilesData } = await supabase
-        .from("profiles")
+        .from("room_player_profiles" as any)
         .select("user_id, display_name, nickname")
-        .in("user_id", userIds);
+        .eq("room_id", roomId);
 
       const profileMap = new Map(
         (profilesData || []).map((p: any) => [p.user_id, p])
