@@ -495,6 +495,8 @@ const AdminDashboard = () => {
       bank_scope: "private",
       owner_id: user.id,
       source_question_id: null,
+      status: "published",
+      source_type: "saved_from_game",
       media_url: null,
       media_path: mediaPath,
       media_type: q.mediaType || "none",
