@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 import AIQuestionGenerator from "@/components/game/AIQuestionGenerator";
 import {
   PRIVATE_BANK_MEDIA_BUCKET,
@@ -247,7 +248,7 @@ const QuestionBank = () => {
     }
   };
 
-  const exportBank = (format: "json" | "csv") => {
+  const exportBank = (format: "json" | "csv" | "xlsx") => {
     const rows = scopedQuestions.map(q => ({
       question_text: q.question_text,
       options: q.options,
@@ -265,10 +266,17 @@ const QuestionBank = () => {
     if (format === "json") {
       blob = new Blob([JSON.stringify(rows, null, 2)], { type: "application/json;charset=utf-8" });
       name = `trivia-bank-${bankView}-${stamp}.json`;
-    } else {
+    } else if (format === "csv") {
       const csv = Papa.unparse(rows);
       blob = new Blob(["\\ufeff", csv], { type: "text/csv;charset=utf-8" });
       name = `trivia-bank-${bankView}-${stamp}.csv`;
+    } else {
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Questions");
+      const bytes = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+      blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      name = `trivia-bank-${bankView}-${stamp}.xlsx`;
     }
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -654,13 +662,36 @@ const QuestionBank = () => {
     loadQuestions();
   }, [questions]);
 
-  /* ─── CSV Import ─── */
-  const handleCsvImport = (file: File) => {
+  /* ─── CSV / Excel Import ─── */
+  const handleImportFile = async (file: File) => {
     if (!user) return;
+    const isExcel = /\\.(xlsx|xls)$/i.test(file.name);
+    let rows: any[] = [];
+    if (isExcel) {
+      try {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        rows = XLSX.utils.sheet_to_json(sheet, { defval: "" }) as any[];
+      } catch {
+        toast.error("שגיאה בקריאת קובץ Excel");
+        return;
+      }
+      await processImportRows(rows);
+      return;
+    }
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
       complete: async (results) => {
+        await processImportRows(results.data as any[]);
+      },
+      error: () => toast.error("שגיאה בקריאת הקובץ"),
+    });
+  };
+
+  const processImportRows = async (rows: any[]) => {
+    if (!user) return;
         const rows = results.data as any[];
         const payload: any[] = [];
         let skipped = 0;
@@ -724,10 +755,7 @@ const QuestionBank = () => {
         if (imported > 0) {
           toast.success(`יובאו ${imported} שאלות בהצלחה!${skipped > 0 ? ` (${skipped} שורות דולגו)` : ""}`);
         }
-        loadQuestions();
-      },
-      error: () => toast.error("שגיאה בקריאת הקובץ"),
-    });
+    loadQuestions();
   };
 
   /* ─── Filtered questions ─── */
@@ -773,10 +801,10 @@ const QuestionBank = () => {
           <div className="flex items-center gap-2">
             <Button variant="neon-outline" size="sm" onClick={() => csvInputRef.current?.click()}>
               <FileSpreadsheet className="w-4 h-4" />
-              ייבוא CSV
+              ייבוא CSV / Excel
             </Button>
-            <input ref={csvInputRef} type="file" accept=".csv" className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleCsvImport(f); e.target.value = ""; }}
+            <input ref={csvInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleImportFile(f); e.target.value = ""; }}
             />
             <Button variant="neon-outline" size="sm" onClick={() => setShowAI(true)} disabled={bankView === "central" && !isAdmin}>
               <Sparkles className="w-4 h-4" />
@@ -911,6 +939,7 @@ const QuestionBank = () => {
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => exportBank("json")} title="גיבוי JSON"><Download className="w-4 h-4" /> JSON</Button>
                 <Button variant="outline" size="sm" onClick={() => exportBank("csv")} title="ייצוא CSV"><FileSpreadsheet className="w-4 h-4" /> CSV</Button>
+                <Button variant="outline" size="sm" onClick={() => exportBank("xlsx")} title="ייצוא Excel"><FileSpreadsheet className="w-4 h-4" /> Excel</Button>
               </div>
             </div>
 
