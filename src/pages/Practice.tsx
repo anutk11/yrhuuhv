@@ -19,7 +19,7 @@ const Practice = () => {
 
   const load=async()=>{
     setLoading(true);
-    const {data}=await supabase.from("question_bank").select("id,question_text,options,correct_index,question_type").eq("status","published");
+    const {data}=await supabase.from("question_bank" as any).select("id,question_text,options,correct_index,question_type").eq("status","published");
     const qs=((data||[]) as any[]).filter(q=>q.question_type==="trivia" && Array.isArray(q.options) && q.options.length>=2);
     for(let i=qs.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[qs[i],qs[j]]=[qs[j],qs[i]];}
     setBank(qs.slice(0,10)); setIndex(0); setSelected(null); setScore(0); setFinished(false); setLoading(false);
