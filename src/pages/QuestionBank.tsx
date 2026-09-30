@@ -440,8 +440,8 @@ const QuestionBank = () => {
   const confirmDeleteFolder = async () => {
     if (!deletingFolder) return;
     const paths = getAllDescendantPaths(deletingFolder);
-    if (!isAdmin && bankView === "central") {
-      toast.error("אי אפשר למחוק תיקייה מהמאגר המרכזי");
+    if (bankView === "central" && !isAdmin) {
+      toast.error("רק מנהל יכול למחוק תיקייה מהמאגר המרכזי");
       return;
     }
     const deletingScope = bankView;
