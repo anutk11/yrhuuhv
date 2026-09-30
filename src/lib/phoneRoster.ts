@@ -1,5 +1,3 @@
-import { supabase } from "@/integrations/supabase/client";
-
 // Phone players have a synthetic user_id of the form:
 // 00000000-0000-0000-0000-<12 digits>  (left-padded phone digits)
 const PHONE_UUID_PREFIX = "00000000-0000-0000-0000-";
@@ -50,6 +48,7 @@ export async function fetchRosterMap(phones: string[]): Promise<RosterMap> {
     variants.add(p.replace(/^0+/, ""));
   }
 
+  const { supabase } = await import("@/integrations/supabase/client");
   const { data, error } = await supabase
     .from("player_roster")
     .select("phone_number, player_name")
