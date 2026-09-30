@@ -368,20 +368,11 @@ const QuestionBank = () => {
     if (!newQ.question_text.trim() || newQ.options.some((o) => !o.trim()) || !user) return;
 
     if (!editingId) {
-      const { data: duplicates, error: duplicateError } = await supabase.rpc("find_question_bank_duplicates", {
-        _question_id: crypto.randomUUID(),
-        _limit: 1,
-      });
-      // The duplicate RPC requires an existing id, so exact duplicate detection is also performed locally.
       const localDuplicate = scopedQuestions.find(q =>
         q.question_text.trim().replace(/\\s+/g, " ").toLowerCase() === newQ.question_text.trim().replace(/\\s+/g, " ").toLowerCase()
         && q.id !== editingId
       );
-      if (duplicateError && !localDuplicate) {
-        // Non-blocking: older databases may not yet have the RPC.
-      }
       if (localDuplicate && !confirm("נמצאה שאלה עם אותו נוסח במאגר. לשמור בכל זאת?")) return;
-    }
     const editingQuestion = editingId ? questions.find((q) => q.id === editingId) : null;
     const editingCentral = !!editingQuestion && editingQuestion.bank_scope === "central";
     if (editingCentral && !isAdmin) {
