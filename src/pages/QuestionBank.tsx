@@ -180,7 +180,7 @@ const QuestionBank = () => {
   const [selectedFolder, setSelectedFolder] = useState<string>("הכל");
   const [selectedCategory, setSelectedCategory] = useState<string>("הכל");
   const [searchText, setSearchText] = useState("");
-  const [bankView, setBankView] = useState<"all" | "private" | "central">("all");
+  const [bankView, setBankView] = useState<"private" | "central">("private");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
@@ -248,9 +248,9 @@ const QuestionBank = () => {
     setQuestions(qs);
   };
 
-  const scopedQuestions: BankQuestion[] = questions.filter((q) => bankView === "all" || q.bank_scope === bankView);
+  const scopedQuestions: BankQuestion[] = questions.filter((q) => q.bank_scope === bankView);
   const visiblePersistedFolders = persistedFolders
-    .filter((folder) => bankView === "all" || folder.scope === bankView)
+    .filter((folder) => folder.scope === bankView)
     .map((folder) => folder.path);
   const folderPaths = [...new Set([
     ...visiblePersistedFolders,
@@ -416,7 +416,7 @@ const QuestionBank = () => {
     if (!newFolderName.trim() || !user) return;
     const name = newFolderName.trim();
     const fullPath = parentForNewFolder ? parentForNewFolder + SEPARATOR + name : name;
-    const scope = bankView === "central" && isAdmin ? "central" : "private";
+    if (bankView === "central" && !isAdmin) {\n      toast.error("רק מנהל יכול ליצור תיקיות במאגר המרכזי");\n      return;\n    }\n    const scope = bankView;
     const ownerId = scope === "central" ? null : user.id;
     void supabase.from("question_folders")
       .insert({ path: fullPath, created_by: user.id, owner_id: ownerId, scope } as any)
@@ -444,7 +444,7 @@ const QuestionBank = () => {
       toast.error("אי אפשר למחוק תיקייה מהמאגר המרכזי");
       return;
     }
-    const deletingScope = bankView === "central" && isAdmin ? "central" : "private";
+    const deletingScope = bankView;
     const affectedQuestions = questions.filter((q) => paths.includes(q.folder) && q.bank_scope === deletingScope);
     if (affectedQuestions.length > 0) {
       const { error } = await supabase.from("question_bank").delete().in("id", affectedQuestions.map((q) => q.id));
@@ -595,7 +595,6 @@ const QuestionBank = () => {
         {/* Header */}
         <div className="flex items-center gap-2 mb-5">
           {([
-            ["all", "כל השאלות"],
             ["private", "המאגר שלי"],
             ["central", "המאגר המרכזי"],
           ] as const).map(([value, label]) => (
