@@ -416,7 +416,10 @@ const QuestionBank = () => {
     if (!newFolderName.trim() || !user) return;
     const name = newFolderName.trim();
     const fullPath = parentForNewFolder ? parentForNewFolder + SEPARATOR + name : name;
-    if (bankView === "central" && !isAdmin) {\n      toast.error("רק מנהל יכול ליצור תיקיות במאגר המרכזי");\n      return;\n    }\n    const scope = bankView;
+    if (bankView === "central" && !isAdmin) {
+      toast.error("רק מנהל יכול ליצור תיקיות במאגר המרכזי");
+      return;
+    }\n    const scope = bankView;
     const ownerId = scope === "central" ? null : user.id;
     void supabase.from("question_folders")
       .insert({ path: fullPath, created_by: user.id, owner_id: ownerId, scope } as any)
