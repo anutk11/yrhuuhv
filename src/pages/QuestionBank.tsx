@@ -487,6 +487,9 @@ const QuestionBank = () => {
 
           payload.push({
             created_by: user.id,
+            owner_id: user.id,
+            bank_scope: "private",
+            source_question_id: null,
             question_text: text,
             options,
             correct_index: type === "survey" ? -1 : rawCorrect,
