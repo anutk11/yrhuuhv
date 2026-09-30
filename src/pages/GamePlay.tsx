@@ -94,6 +94,41 @@ const GamePlay = () => {
     setSurveyVotes(currentQuestion.options.map((_, i) => counts[i] ?? 0));
   }, [currentQuestion, roomId]);
 
+  const syncPhase = useCallback(async (forcedPhase?: GamePhase, forcedQuestionIndex?: number) => {
+    if (!roomId || !room || isSyncingPhaseRef.current) return false;
+    if (user?.id !== room.host_id) return false;
+
+    const expectedPhase = forcedPhase ?? phase;
+    const expectedQuestionIndex = forcedQuestionIndex ?? currentQuestionIndex;
+    const transition = getNextPhaseTransition({
+      currentPhase: expectedPhase,
+      currentQuestionIndex: expectedQuestionIndex,
+      questions,
+      settings: room.settings,
+    });
+
+    if (!transition) return false;
+
+    isSyncingPhaseRef.current = true;
+    try {
+      const { data, error } = await supabase.rpc("sync_room_phase", {
+        _room_id: roomId,
+        _expected_question_index: expectedQuestionIndex,
+        _expected_phase: expectedPhase,
+        _next_phase: transition.nextPhase,
+        _phase_duration_seconds: transition.duration,
+        _next_question_index: transition.nextQuestionIndex ?? null,
+        _next_status: transition.nextStatus ?? null,
+      });
+
+      if (error) return false;
+      await fetchRoom();
+      return !!data;
+    } finally {
+      isSyncingPhaseRef.current = false;
+    }
+  }, [roomId, room, phase, currentQuestionIndex, questions, fetchRoom, user?.id]);
+
   useEffect(() => {
     if (currentQuestionIndex >= 0 && currentQuestion) {
       setLastScoreGain(0);
