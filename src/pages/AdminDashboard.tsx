@@ -15,6 +15,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import TelephoneQuestionStage from "@/components/game/TelephoneQuestionStage";
 import { toast } from "sonner";
+import { copyPrivateBankMedia, copyPublicGameMediaToPrivate, fileExtension } from "@/lib/questionMedia";
 
 interface Question {
   id: string;
@@ -40,6 +41,7 @@ interface BankQuestion {
   time_limit: number;
   media_url?: string;
   media_type?: string;
+  media_path?: string | null;
   image_view_time?: number;
   keep_image?: boolean;
   bank_scope?: "private" | "central";
@@ -522,7 +524,7 @@ const AdminDashboard = () => {
     }
     setUploading(true);
     const ext = file.name.split(".").pop();
-    const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
+    const path = `rooms/${roomId}/${crypto.randomUUID()}.${ext}`;
     const { error } = await supabase.storage.from("question-media").upload(path, file);
     if (error) {
       toast.error("שגיאה בהעלאת קובץ");
@@ -546,7 +548,7 @@ const AdminDashboard = () => {
     }
     setUploadingAudio(type);
     const ext = file.name.split(".").pop();
-    const path = `${user?.id}/audio/${crypto.randomUUID()}.${ext}`;
+    const path = `rooms/${roomId}/audio/${crypto.randomUUID()}.${ext}`;
     const { error } = await supabase.storage.from("question-media").upload(path, file);
     if (error) { toast.error("שגיאה בהעלאת קובץ אודיו"); setUploadingAudio(null); return; }
     const { data: urlData } = supabase.storage.from("question-media").getPublicUrl(path);
