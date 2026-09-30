@@ -472,6 +472,17 @@ const AdminDashboard = () => {
 
   const saveQuestionToBank = async (q: Question) => {
     if (!user) return;
+    let mediaPath: string | null = null;
+    if (q.mediaUrl) {
+      mediaPath = await copyPublicGameMediaToPrivate(
+        q.mediaUrl,
+        `${user.id}/${crypto.randomUUID()}${fileExtension(q.mediaUrl) || ".bin"}`,
+      );
+      if (!mediaPath) {
+        toast.error("לא ניתן לשמור את המדיה במאגר הפרטי");
+        return;
+      }
+    }
     const { error } = await supabase.from("question_bank").insert({
       created_by: user.id,
       question_text: q.text,
@@ -484,7 +495,8 @@ const AdminDashboard = () => {
       bank_scope: "private",
       owner_id: user.id,
       source_question_id: null,
-      media_url: q.mediaUrl || null,
+      media_url: null,
+      media_path: mediaPath,
       media_type: q.mediaType || "none",
       image_view_time: q.imageViewTime ?? 5,
       keep_image: q.keepImage ?? false,
@@ -492,8 +504,6 @@ const AdminDashboard = () => {
     if (error) { toast.error("שגיאה בשמירה למאגר"); return; }
     toast.success("השאלה נשמרה למאגר!");
   };
-
-
   // Save settings
   const saveSettings = async () => {
     if (!roomId) return;
@@ -617,6 +627,18 @@ const AdminDashboard = () => {
 
   const addFromBank = async (bq: BankQuestion) => {
     if (!roomId) return;
+    let mediaUrl = bq.media_url || null;
+    if (bq.media_path) {
+      mediaUrl = await copyPrivateBankMedia(
+        bq.media_path,
+        "question-media",
+        `rooms/${roomId}/${crypto.randomUUID()}${fileExtension(bq.media_path) || ".bin"}`,
+      );
+      if (!mediaUrl) {
+        toast.error("לא ניתן להעתיק את המדיה הפרטית למשחק");
+        return;
+      }
+    }
     const { data, error } = await supabase.from("questions").insert({
       room_id: roomId,
       question_text: bq.question_text,
@@ -625,7 +647,7 @@ const AdminDashboard = () => {
       question_type: bq.question_type,
       time_limit: bq.time_limit,
       sort_order: questions.length,
-      media_url: bq.media_url || null,
+      media_url: mediaUrl,
       media_type: bq.media_type || "none",
       image_view_time: bq.image_view_time ?? 5,
       keep_image: bq.keep_image ?? false,
@@ -645,9 +667,10 @@ const AdminDashboard = () => {
         keepImage: (data as any).keep_image ?? false,
       }]);
       toast.success("השאלה נוספה!");
+    } else if (error) {
+      toast.error("שגיאה בהוספת השאלה");
     }
   };
-
   const deleteQuestion = async (id: string) => {
     await supabase.from("questions").delete().eq("id", id);
     setQuestions((prev) => prev.filter((q) => q.id !== id));
