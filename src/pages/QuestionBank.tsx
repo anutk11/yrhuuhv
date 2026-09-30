@@ -377,7 +377,7 @@ const QuestionBank = () => {
     const name = newFolderName.trim();
     const fullPath = parentForNewFolder ? parentForNewFolder + SEPARATOR + name : name;
     void supabase.from("question_folders")
-      .insert({ path: fullPath, created_by: user.id, owner_id: user.id, scope: "private" })
+      .insert({ path: fullPath, created_by: user.id, owner_id: user.id, scope: "private" } as any)
       .then(({ error }) => {
         if (error) {
           toast.error("שגיאה ביצירת התיקייה");
