@@ -40,6 +40,9 @@ interface BankQuestion {
   time_limit: number;
   media_url?: string;
   media_type?: string;
+  image_view_time?: number;
+  keep_image?: boolean;
+  bank_scope?: "private" | "central";
 }
 
 function generateRoomCode() {
@@ -86,7 +89,7 @@ const AudioUploadField = ({ label, url, uploading, onUpload, onRemove }: {
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -476,6 +479,9 @@ const AdminDashboard = () => {
       time_limit: q.timeLimit,
       category: "כללי",
       folder: "כללי",
+      bank_scope: "private",
+      owner_id: user.id,
+      source_question_id: null,
       media_url: q.mediaUrl || null,
       media_type: q.mediaType || "none",
       image_view_time: q.imageViewTime ?? 5,
@@ -516,7 +522,7 @@ const AdminDashboard = () => {
     }
     setUploading(true);
     const ext = file.name.split(".").pop();
-    const path = `${crypto.randomUUID()}.${ext}`;
+    const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
     const { error } = await supabase.storage.from("question-media").upload(path, file);
     if (error) {
       toast.error("שגיאה בהעלאת קובץ");
@@ -616,6 +622,10 @@ const AdminDashboard = () => {
       question_type: bq.question_type,
       time_limit: bq.time_limit,
       sort_order: questions.length,
+      media_url: bq.media_url || null,
+      media_type: bq.media_type || "none",
+      image_view_time: bq.image_view_time ?? 5,
+      keep_image: bq.keep_image ?? false,
     }).select().single();
 
     if (!error && data) {
@@ -842,7 +852,7 @@ const AdminDashboard = () => {
             </Button>
           </div>
 
-          <RosterUpload />
+          {isAdmin && <RosterUpload />}
 
           <button onClick={() => navigate("/")} className="text-muted-foreground hover:text-foreground text-sm w-full text-center block">
             חזרה לדף הבית
@@ -876,7 +886,7 @@ const AdminDashboard = () => {
             <Button
               variant="neon-outline"
               size="sm"
-              onClick={() => navigate("/admin/history")}
+              onClick={() => navigate("/history")}
               title="היסטוריית משחקים"
             >
               <span className="text-base">🏆</span>
