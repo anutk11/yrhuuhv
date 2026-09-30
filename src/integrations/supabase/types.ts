@@ -323,6 +323,7 @@ export type Database = {
           keep_image: boolean
           media_type: string | null
           media_url: string | null
+          media_path: string | null
           options: Json
           question_text: string
           question_type: string
@@ -342,6 +343,7 @@ export type Database = {
           keep_image?: boolean
           media_type?: string | null
           media_url?: string | null
+          media_path?: string | null
           options?: Json
           question_text: string
           question_type?: string
@@ -361,6 +363,7 @@ export type Database = {
           keep_image?: boolean
           media_type?: string | null
           media_url?: string | null
+          media_path?: string | null
           options?: Json
           question_text?: string
           question_type?: string
