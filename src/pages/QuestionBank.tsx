@@ -249,7 +249,7 @@ const QuestionBank = () => {
   const handleMediaUpload = async (file: File) => {
     setUploading(true);
     const ext = file.name.split(".").pop();
-    const path = `${crypto.randomUUID()}.${ext}`;
+    const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
     const { error } = await supabase.storage.from("question-media").upload(path, file);
     if (error) { toast.error("שגיאה בהעלאת קובץ"); setUploading(false); return; }
     const { data: urlData } = supabase.storage.from("question-media").getPublicUrl(path);
