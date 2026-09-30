@@ -163,9 +163,30 @@ export type Database = {
         Relationships: []
       }
       question_folders: {
-        Row: { created_at: string; created_by: string | null; path: string }
-        Insert: { created_at?: string; created_by?: string | null; path: string }
-        Update: { created_at?: string; created_by?: string | null; path?: string }
+        Row: { 
+          id: string
+          path: string
+          created_by: string | null
+          created_at: string
+          scope: "private" | "central"
+          owner_id: string | null
+        }
+        Insert: { 
+          id?: string
+          path: string
+          created_by?: string | null
+          created_at?: string
+          scope?: "private" | "central"
+          owner_id?: string | null
+        }
+        Update: { 
+          id?: string
+          path?: string
+          created_by?: string | null
+          created_at?: string
+          scope?: "private" | "central"
+          owner_id?: string | null
+        }
         Relationships: []
       }
       game_templates: {
@@ -306,6 +327,9 @@ export type Database = {
           question_text: string
           question_type: string
           time_limit: number
+          bank_scope: "private" | "central"
+          owner_id: string | null
+          source_question_id: string | null
         }
         Insert: {
           category?: string
@@ -322,6 +346,9 @@ export type Database = {
           question_text: string
           question_type?: string
           time_limit?: number
+          bank_scope?: "private" | "central"
+          owner_id?: string | null
+          source_question_id?: string | null
         }
         Update: {
           category?: string
@@ -338,6 +365,150 @@ export type Database = {
           question_text?: string
           question_type?: string
           time_limit?: number
+          bank_scope?: "private" | "central"
+          owner_id?: string | null
+          source_question_id?: string | null
+        }
+        Relationships: []
+      }
+      game_history_players: {
+        Row: {
+          history_id: string
+          user_id: string
+          display_name: string
+          nickname: string
+          score: number
+          joined_at: string | null
+          is_phone: boolean
+        }
+        Insert: {
+          history_id: string
+          user_id: string
+          display_name?: string
+          nickname?: string
+          score?: number
+          joined_at?: string | null
+          is_phone?: boolean
+        }
+        Update: {
+          history_id?: string
+          user_id?: string
+          display_name?: string
+          nickname?: string
+          score?: number
+          joined_at?: string | null
+          is_phone?: boolean
+        }
+        Relationships: []
+      }
+      game_history_questions: {
+        Row: {
+          history_id: string
+          question_id: string
+          sort_order: number
+          question_text: string
+          options: Json
+          correct_index: number | null
+          question_type: string
+          time_limit: number
+          media_url: string | null
+          media_type: string | null
+          image_view_time: number
+          keep_image: boolean
+        }
+        Insert: {
+          history_id: string
+          question_id: string
+          sort_order: number
+          question_text: string
+          options?: Json
+          correct_index?: number | null
+          question_type: string
+          time_limit?: number
+          media_url?: string | null
+          media_type?: string | null
+          image_view_time?: number
+          keep_image?: boolean
+        }
+        Update: {
+          history_id?: string
+          question_id?: string
+          sort_order?: number
+          question_text?: string
+          options?: Json
+          correct_index?: number | null
+          question_type?: string
+          time_limit?: number
+          media_url?: string | null
+          media_type?: string | null
+          image_view_time?: number
+          keep_image?: boolean
+        }
+        Relationships: []
+      }
+      game_history_answers: {
+        Row: {
+          history_id: string
+          question_id: string
+          user_id: string
+          selected_index: number
+          answer_time_ms: number
+          score: number
+          is_correct: boolean
+          created_at: string
+        }
+        Insert: {
+          history_id: string
+          question_id: string
+          user_id: string
+          selected_index: number
+          answer_time_ms?: number
+          score?: number
+          is_correct?: boolean
+          created_at?: string
+        }
+        Update: {
+          history_id?: string
+          question_id?: string
+          user_id?: string
+          selected_index?: number
+          answer_time_ms?: number
+          score?: number
+          is_correct?: boolean
+          created_at?: string
+        }
+        Relationships: []
+      }
+      question_bank_audit_log: {
+        Row: {
+          id: string
+          question_id: string | null
+          action: "INSERT" | "UPDATE" | "DELETE"
+          bank_scope: string | null
+          actor_id: string | null
+          created_at: string
+          old_data: Json | null
+          new_data: Json | null
+        }
+        Insert: {
+          id?: string
+          question_id?: string | null
+          action: "INSERT" | "UPDATE" | "DELETE"
+          bank_scope?: string | null
+          actor_id?: string | null
+          created_at?: string
+          old_data?: Json | null
+          new_data?: Json | null
+        }
+        Update: {
+          id?: string
+          question_id?: string | null
+          action?: "INSERT" | "UPDATE" | "DELETE"
+          bank_scope?: string | null
+          actor_id?: string | null
+          created_at?: string
+          old_data?: Json | null
+          new_data?: Json | null
         }
         Relationships: []
       }
@@ -490,6 +661,17 @@ export type Database = {
       }
     }
     Views: {
+      room_player_profiles: {
+        Row: {
+          room_id: string
+          user_id: string
+          display_name: string
+          nickname: string
+          avatar_url: string | null
+        }
+        Relationships: []
+      }
+
       public_questions: {
         Row: {
           correct_index: number | null
@@ -518,6 +700,27 @@ export type Database = {
       }
     }
     Functions: {
+      admin_list_users: {
+        Args: Record<string, never>
+        Returns: {
+          user_id: string
+          email: string
+          display_name: string
+          nickname: string
+          role: Database["public"]["Enums"]["app_role"]
+          created_at: string
+          last_sign_in_at: string | null
+        }[]
+      }
+      admin_set_user_role: {
+        Args: { _role: Database["public"]["Enums"]["app_role"]; _user_id: string }
+        Returns: boolean
+      }
+      can_view_game_history: {
+        Args: { _history_id: string; _user_id: string }
+        Returns: boolean
+      }
+
       advance_room_question: {
         Args: { _from_index: number; _room_id: string; _to_index: number }
         Returns: boolean
