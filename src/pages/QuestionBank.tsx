@@ -562,7 +562,7 @@ const QuestionBank = () => {
               {label}
             </button>
           ))}
-        </div>}
+        </div>
         <div className="flex items-center justify-between mb-8">
           <button onClick={() => navigate("/")} className="text-muted-foreground hover:text-foreground flex items-center gap-2 text-sm">
             <ArrowLeft className="w-4 h-4" />
