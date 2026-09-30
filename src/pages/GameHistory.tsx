@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Trophy, ChevronLeft, Trash2, Calendar, Users, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface HistoryEntry {
   id: string;
@@ -15,10 +16,29 @@ interface HistoryEntry {
   rankings: Array<{ user_id: string; score: number; display_name?: string; nickname?: string }>;
   finished_at: string;
 }
+interface HistoryQuestion {
+  question_id: string;
+  sort_order: number;
+  question_text: string;
+  options: string[];
+  correct_index: number | null;
+}
+interface HistoryAnswer {
+  question_id: string;
+  user_id: string;
+  selected_index: number;
+  answer_time_ms: number;
+  score: number;
+  is_correct: boolean;
+}
 
 const GameHistory = () => {
+  const { user, isAdmin } = useAuth();
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [details, setDetails] = useState<{ questions: HistoryQuestion[]; answers: HistoryAnswer[] } | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -34,7 +54,23 @@ const GameHistory = () => {
     setLoading(false);
   };
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { if (user) void load(); }, [user]);
+
+  const openDetails = async (historyId: string) => {
+    if (selected === historyId) { setSelected(null); setDetails(null); return; }
+    setSelected(historyId);
+    setDetailsLoading(true);
+    const [{ data: questionRows }, { data: answerRows }] = await Promise.all([
+      supabase.from("game_history_questions" as any).select("question_id, sort_order, question_text, options, correct_index").eq("history_id", historyId).order("sort_order"),
+      supabase.from("game_history_answers" as any).select("question_id, user_id, selected_index, answer_time_ms, score, is_correct").eq("history_id", historyId),
+    ]);
+    const ownAnswers = (answerRows || []).filter((a: any) => isAdmin || a.user_id === user?.id);
+    setDetails({
+      questions: (questionRows || []) as HistoryQuestion[],
+      answers: ownAnswers as HistoryAnswer[],
+    });
+    setDetailsLoading(false);
+  };
 
   const remove = async (id: string) => {
     if (!confirm("למחוק את הרשומה הזו?")) return;
@@ -75,18 +111,20 @@ const GameHistory = () => {
                 <div key={h.id} className="bg-white/5 border border-white/10 rounded-2xl p-5">
                   <div className="flex items-start justify-between mb-3">
                     <div>
-                      <h2 className="text-2xl font-display font-bold">
+                      <button onClick={() => void openDetails(h.id)} className="text-2xl font-display font-bold text-right hover:text-cyan-300 transition-colors">
                         {h.room_name || "משחק"} {h.room_code ? <span className="text-white/40 text-base">#{h.room_code}</span> : null}
-                      </h2>
+                      </button>
                       <div className="flex gap-4 text-sm text-white/60 mt-1">
                         <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{new Date(h.finished_at).toLocaleString("he-IL")}</span>
                         <span className="flex items-center gap-1"><Users className="w-3 h-3" />{h.players_count} שחקנים</span>
                         <span className="flex items-center gap-1"><HelpCircle className="w-3 h-3" />{h.questions_count} שאלות</span>
                       </div>
                     </div>
-                    <button onClick={() => remove(h.id)} className="text-red-400/70 hover:text-red-400 p-2">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {(isAdmin || user?.id === h.rankings?.find((p) => p.user_id === user?.id)?.user_id) && h.id && (
+                      <button onClick={() => remove(h.id)} className="text-red-400/70 hover:text-red-400 p-2">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                   {top.length > 0 && (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
@@ -101,6 +139,36 @@ const GameHistory = () => {
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+                  {selected === h.id && (
+                    <div className="mt-5 border-t border-white/10 pt-4">
+                      {detailsLoading ? (
+                        <div className="text-sm text-white/60">טוען פרטי משחק...</div>
+                      ) : !details ? (
+                        <div className="text-sm text-white/60">אין נתוני snapshot להצגה.</div>
+                      ) : (
+                        <div className="space-y-3">
+                          <h3 className="font-display font-bold text-cyan-300">השאלות והתשובות שלי במשחק</h3>
+                          {details.questions.map((q) => {
+                            const a = details.answers.find((answer) => answer.question_id === q.question_id);
+                            return (
+                              <div key={q.question_id} className="rounded-xl bg-black/20 border border-white/10 p-3">
+                                <div className="text-sm font-medium mb-2">{q.sort_order + 1}. {q.question_text}</div>
+                                {a ? (
+                                  <div className="text-xs text-white/70">
+                                    תשובה: <span className={a.is_correct ? "text-emerald-300" : "text-red-300"}>{q.options?.[a.selected_index] ?? "—"}</span>
+                                    {" · "}ניקוד: <span className="text-cyan-300">{a.score}</span>
+                                    {" · "}זמן: {a.answer_time_ms}ms
+                                  </div>
+                                ) : (
+                                  <div className="text-xs text-white/40">לא נענתה</div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
