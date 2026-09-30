@@ -416,6 +416,18 @@ const QuestionBank = () => {
     loadQuestions();
   };
 
+  const publishDraft = async (q: BankQuestion) => {
+    if (!user || q.status !== "draft") return;
+    if (q.bank_scope === "central" && !isAdmin) {
+      toast.error("רק מנהל יכול לפרסם טיוטה מרכזית");
+      return;
+    }
+    const { error } = await supabase.from("question_bank").update({ status: "published" } as any).eq("id", q.id);
+    if (error) { toast.error("שגיאה בפרסום הטיוטה"); return; }
+    toast.success("הטיוטה פורסמה");
+    loadQuestions();
+  };
+
   const publishToCentral = async (q: BankQuestion) => {
     if (!user || !isAdmin || q.bank_scope !== "private") return;
     let mediaUrl: string | null = q.media_path ? null : (q.media_url || null);
@@ -1045,6 +1057,9 @@ const QuestionBank = () => {
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => toggleFavorite(q.id)} className={`p-1 ${favoriteIds.has(q.id) ? "text-rose-400" : "text-muted-foreground hover:text-rose-400"}`} title="מועדפים"><Heart className="w-3.5 h-3.5" fill={favoriteIds.has(q.id) ? "currentColor" : "none"} /></button>
                         <button onClick={() => duplicateBankQuestion(q)} className="text-muted-foreground hover:text-primary p-1" title={q.bank_scope === "central" ? "העתק למאגר שלי" : "שכפל"}><Copy className="w-3.5 h-3.5" /></button>
+                        {q.status === "draft" && ( 
+                          <button onClick={() => void publishDraft(q)} className="text-muted-foreground hover:text-answer-green p-1" title="פרסם טיוטה">✓</button>
+                        )}
                         {(q.bank_scope === "private" || isAdmin) && (
                           <>
                             {isAdmin && q.bank_scope === "private" && (
