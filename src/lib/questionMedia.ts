@@ -49,3 +49,25 @@ export async function copyPrivateBankMedia(
 
   return targetPath;
 }
+
+export async function copyPublicGameMediaToPrivate(
+  sourceUrl: string,
+  targetPath: string,
+): Promise<string | null> {
+  try {
+    const response = await fetch(sourceUrl);
+    if (!response.ok) return null;
+    const file = await response.blob();
+    const { error } = await supabase.storage
+      .from(PRIVATE_BANK_MEDIA_BUCKET)
+      .upload(targetPath, file, { upsert: false });
+    if (error) {
+      console.error("copyPublicGameMediaToPrivate upload error", error);
+      return null;
+    }
+    return targetPath;
+  } catch (error) {
+    console.error("copyPublicGameMediaToPrivate error", error);
+    return null;
+  }
+}
