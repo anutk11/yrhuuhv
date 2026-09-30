@@ -546,7 +546,7 @@ const AdminDashboard = () => {
     }
     setUploadingAudio(type);
     const ext = file.name.split(".").pop();
-    const path = `audio/${crypto.randomUUID()}.${ext}`;
+    const path = `${user?.id}/audio/${crypto.randomUUID()}.${ext}`;
     const { error } = await supabase.storage.from("question-media").upload(path, file);
     if (error) { toast.error("שגיאה בהעלאת קובץ אודיו"); setUploadingAudio(null); return; }
     const { data: urlData } = supabase.storage.from("question-media").getPublicUrl(path);
