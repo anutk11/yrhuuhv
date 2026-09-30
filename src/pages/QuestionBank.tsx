@@ -280,9 +280,9 @@ const QuestionBank = () => {
       media_type: newQ.media_type || "none",
       image_view_time: newQ.image_view_time,
       keep_image: newQ.keep_image,
-      created_by: editingCentral ? (editingQuestion?.owner_id ?? user.id) : user.id,
-      bank_scope: editingCentral ? "central" : "private",
-      owner_id: editingCentral ? null : user.id,
+      created_by: (editingCentral || (!editingId && bankView === "central" && isAdmin)) ? user.id : user.id,
+      bank_scope: editingCentral || (!editingId && bankView === "central" && isAdmin) ? "central" : "private",
+      owner_id: editingCentral || (!editingId && bankView === "central" && isAdmin) ? null : user.id,
       source_question_id: editingCentral ? (editingQuestion?.source_question_id ?? null) : null,
     };
     if (editingId) {
@@ -298,6 +298,33 @@ const QuestionBank = () => {
     setEditingId(null);
     setShowForm(false);
     resetForm();
+    loadQuestions();
+  };
+
+  const publishToCentral = async (q: BankQuestion) => {
+    if (!user || !isAdmin || q.bank_scope !== "private") return;
+    const { error } = await supabase.from("question_bank").insert({
+      created_by: user.id,
+      owner_id: null,
+      bank_scope: "central",
+      source_question_id: q.id,
+      question_text: q.question_text,
+      options: q.options,
+      correct_index: q.correct_index,
+      question_type: q.question_type,
+      time_limit: q.time_limit,
+      category: q.category,
+      folder: q.folder,
+      media_url: q.media_url || null,
+      media_type: q.media_type || "none",
+      image_view_time: q.image_view_time ?? 5,
+      keep_image: q.keep_image ?? false,
+    } as any);
+    if (error) {
+      toast.error(error.code === "23505" ? "השאלה כבר פורסמה למרכז" : "שגיאה בפרסום למאגר המרכזי");
+      return;
+    }
+    toast.success("השאלה פורסמה במאגר המרכזי");
     loadQuestions();
   };
 
@@ -848,6 +875,9 @@ const QuestionBank = () => {
                         <button onClick={() => duplicateBankQuestion(q)} className="text-muted-foreground hover:text-primary p-1" title={q.bank_scope === "central" ? "העתק למאגר שלי" : "שכפל"}><Copy className="w-3.5 h-3.5" /></button>
                         {(q.bank_scope === "private" || isAdmin) && (
                           <>
+                            {isAdmin && q.bank_scope === "private" && (
+                              <button onClick={() => void publishToCentral(q)} className="text-muted-foreground hover:text-amber-300 p-1" title="פרסם במאגר המרכזי">⬆</button>
+                            )}
                             <button onClick={() => startEditing(q)} className="text-muted-foreground hover:text-primary p-1" title="ערוך"><Edit2 className="w-3.5 h-3.5" /></button>
                             <button onClick={() => deleteQuestion(q.id)} className="text-muted-foreground hover:text-destructive p-1" title="מחק"><Trash2 className="w-3.5 h-3.5" /></button>
                           </>
