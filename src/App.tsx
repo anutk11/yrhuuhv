@@ -64,6 +64,14 @@ const App = () => (
               }
             />
             <Route
+              path="/bank"
+              element={
+                <ProtectedRoute>
+                  <QuestionBank />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/admin/bank"
               element={
                 <ProtectedRoute adminOnly>
