@@ -127,13 +127,10 @@ export function useGameSync(roomId: string | null) {
       .eq("room_id", roomId);
     if (!data) return;
 
-    const userIds = data.map((p: any) => p.user_id);
-    const { data: profilesData } = userIds.length
-      ? await supabase
-          .from("profiles")
-          .select("user_id, display_name, nickname")
-          .in("user_id", userIds)
-      : { data: [] as any[] };
+    const { data: profilesData } = await supabase
+      .from("room_player_profiles")
+      .select("user_id, display_name, nickname")
+      .eq("room_id", roomId);
     const profileMap = new Map((profilesData || []).map((p: any) => [p.user_id, p]));
 
     setPlayers(
