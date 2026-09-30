@@ -301,7 +301,7 @@ const GameSummary = () => {
           <Button variant="neon" onClick={() => navigate("/")}>
             חזור לדף הבית
           </Button>
-          <Button variant="neon-outline" onClick={() => navigate("/admin")}>
+          <Button variant="neon-outline" onClick={() => navigate("/dashboard")}>
             משחק חדש
           </Button>
         </motion.div>
