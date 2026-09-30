@@ -725,7 +725,7 @@ const AdminDashboard = () => {
       return;
     }
 
-    const { data: validation, error: validationError } = await supabase.rpc("validate_game_before_start", {
+    const { data: validation, error: validationError } = await supabase.rpc("validate_game_before_start" as any, {
       _room_id: roomId,
     });
     if (validationError) {
@@ -845,7 +845,7 @@ const AdminDashboard = () => {
                           variant="ghost"
                           size="sm"
                           onClick={async () => {
-                            const { error } = await supabase.rpc("recover_game_room", { _room_id: room.id });
+                            const { error } = await supabase.rpc("recover_game_room" as any, { _room_id: room.id });
                             if (error) { toast.error("לא ניתן לשחזר את המשחק"); return; }
                             toast.success("המשחק שוחזר");
                             window.history.replaceState(null, "", `/admin?room=${room.id}`);
