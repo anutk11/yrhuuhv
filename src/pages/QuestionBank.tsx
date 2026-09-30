@@ -373,6 +373,7 @@ const QuestionBank = () => {
         && q.id !== editingId
       );
       if (localDuplicate && !confirm("נמצאה שאלה עם אותו נוסח במאגר. לשמור בכל זאת?")) return;
+    }
     const editingQuestion = editingId ? questions.find((q) => q.id === editingId) : null;
     const editingCentral = !!editingQuestion && editingQuestion.bank_scope === "central";
     if (editingCentral && !isAdmin) {
