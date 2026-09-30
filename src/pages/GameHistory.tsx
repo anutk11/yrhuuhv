@@ -10,6 +10,7 @@ interface HistoryEntry {
   id: string;
   room_id: string;
   room_name: string | null;
+  host_id: string;
   room_code: string | null;
   questions_count: number;
   players_count: number;
@@ -120,7 +121,7 @@ const GameHistory = () => {
                         <span className="flex items-center gap-1"><HelpCircle className="w-3 h-3" />{h.questions_count} שאלות</span>
                       </div>
                     </div>
-                    {(isAdmin || user?.id === h.rankings?.find((p) => p.user_id === user?.id)?.user_id) && h.id && (
+                    {(isAdmin || user?.id === h.host_id) && h.id && (
                       <button onClick={() => remove(h.id)} className="text-red-400/70 hover:text-red-400 p-2">
                         <Trash2 className="w-4 h-4" />
                       </button>
