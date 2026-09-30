@@ -48,7 +48,7 @@ const AdminManagement = () => {
     else setUsers((userRows || []) as AdminUser[]);
 
     if (auditError) toast.error("שגיאה בטעינת Audit Log");
-    else setAudit((auditRows || []) as AuditEntry[]);
+    else setAudit((auditRows || []) as unknown as AuditEntry[]);
 
     setLoading(false);
   };
