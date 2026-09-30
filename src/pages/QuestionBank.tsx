@@ -352,6 +352,18 @@ const QuestionBank = () => {
 
   const publishToCentral = async (q: BankQuestion) => {
     if (!user || !isAdmin || q.bank_scope !== "private") return;
+    let mediaUrl: string | null = q.media_path ? null : (q.media_url || null);
+    if (q.media_path) {
+      mediaUrl = await copyPrivateBankMedia(
+        q.media_path,
+        PUBLIC_GAME_MEDIA_BUCKET,
+        `central/${crypto.randomUUID()}${fileExtension(q.media_path) || ".bin"}`,
+      );
+      if (!mediaUrl) {
+        toast.error("לא ניתן להעתיק את המדיה למאגר המרכזי");
+        return;
+      }
+    }
     const { error } = await supabase.from("question_bank").insert({
       created_by: user.id,
       owner_id: null,
@@ -364,7 +376,8 @@ const QuestionBank = () => {
       time_limit: q.time_limit,
       category: q.category,
       folder: q.folder,
-      media_url: q.media_url || null,
+      media_url: mediaUrl,
+      media_path: null,
       media_type: q.media_type || "none",
       image_view_time: q.image_view_time ?? 5,
       keep_image: q.keep_image ?? false,
@@ -376,7 +389,6 @@ const QuestionBank = () => {
     toast.success("השאלה פורסמה במאגר המרכזי");
     loadQuestions();
   };
-
   const deleteQuestion = async (id: string) => {
     const q = questions.find((item) => item.id === id);
     if (!q) return;
@@ -396,6 +408,19 @@ const QuestionBank = () => {
 
   const duplicateBankQuestion = async (q: BankQuestion) => {
     if (!user) return;
+    let mediaPath: string | null = null;
+    let mediaUrl: string | null = q.bank_scope === "central" ? (q.media_url || null) : null;
+    if (q.media_path) {
+      mediaPath = await copyPrivateBankMedia(
+        q.media_path,
+        PRIVATE_BANK_MEDIA_BUCKET,
+        `${user.id}/${crypto.randomUUID()}${fileExtension(q.media_path) || ".bin"}`,
+      );
+      if (!mediaPath) {
+        toast.error("לא ניתן להעתיק את המדיה לשאלה הפרטית");
+        return;
+      }
+    }
     const { error } = await supabase.from("question_bank").insert({
       created_by: user.id,
       owner_id: user.id,
@@ -408,16 +433,16 @@ const QuestionBank = () => {
       time_limit: q.time_limit,
       category: q.category,
       folder: q.folder,
-      media_url: q.media_url || null,
+      media_url: mediaPath ? null : mediaUrl,
+      media_path: mediaPath,
       media_type: q.media_type || "none",
       image_view_time: q.image_view_time ?? 5,
       keep_image: q.keep_image ?? false,
     } as any);
     if (error) { toast.error("שגיאה בשכפול"); return; }
-    toast.success("השאלה שוכפלה");
+    toast.success(q.bank_scope === "central" ? "השאלה הועתקה למאגר שלי" : "השאלה שוכפלה");
     loadQuestions();
   };
-
   const startEditing = (q: BankQuestion) => {
     if (q.bank_scope === "central" && !isAdmin) {
       toast.error("שאלות במאגר המרכזי ניתנות לעריכה רק למנהל");
