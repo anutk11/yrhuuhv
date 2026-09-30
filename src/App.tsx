@@ -56,6 +56,14 @@ const App = () => (
               }
             />
             <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <AdminDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/admin"
               element={
                 <ProtectedRoute adminOnly>
@@ -98,7 +106,7 @@ const App = () => (
             <Route
               path="/telephone"
               element={
-                <ProtectedRoute adminOnly>
+                <ProtectedRoute>
                   <TelephoneHost />
                 </ProtectedRoute>
               }
