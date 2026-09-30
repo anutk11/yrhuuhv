@@ -58,12 +58,10 @@ const Landing = () => {
         >
           {user ? (
             <>
-              {isAdmin && (
-                <Button variant="neon-outline" size="lg" className="text-lg px-8 py-6" onClick={() => navigate("/dashboard")}>
-                  <Users className="w-5 h-5" />
-                  צור משחק חדש
-                </Button>
-              )}
+              <Button variant="neon-outline" size="lg" className="text-lg px-8 py-6" onClick={() => navigate("/dashboard")}>
+                <Users className="w-5 h-5" />
+                צור משחק חדש
+              </Button>
               <Button variant="neon" size="lg" className="text-lg px-8 py-6" onClick={() => navigate("/join")}>
                 <Zap className="w-5 h-5" />
                 הצטרף למשחק
