@@ -67,8 +67,8 @@ const GameHistory = () => {
     ]);
     const ownAnswers = (answerRows || []).filter((a: any) => isAdmin || a.user_id === user?.id);
     setDetails({
-      questions: (questionRows || []) as HistoryQuestion[],
-      answers: ownAnswers as HistoryAnswer[],
+      questions: (questionRows || []) as unknown as HistoryQuestion[],
+      answers: ownAnswers as unknown as HistoryAnswer[],
     });
     setDetailsLoading(false);
   };
