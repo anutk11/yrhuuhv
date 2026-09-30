@@ -538,6 +538,7 @@ const AdminDashboard = () => {
   };
 
   const handleAudioUpload = async (file: File, type: "bg" | "correct" | "wrong" | "end") => {
+    if (!roomId) return;
     if (!file.type.startsWith("audio/")) {
       toast.error("יש לבחור קובץ אודיו");
       return;
