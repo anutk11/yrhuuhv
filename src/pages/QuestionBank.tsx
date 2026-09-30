@@ -213,11 +213,11 @@ const QuestionBank = () => {
   }, []);
 
   const loadPersistedFolders = async () => {
-    const { data } = await supabase.from("question_folders").select("path").order("path");
+    const { data } = await supabase.from("question_folders").select("path, scope").order("path");
     if (data) {
       setPersistedFolders(data.map((row) => ({
         path: row.path,
-        scope: row.scope === "central" ? "central" : "private",
+        scope: (row.scope === "central" ? "central" : "private") as "private" | "central",
       })).filter((row) => row.path));
     }
   };
