@@ -352,6 +352,16 @@ $$;
 REVOKE ALL ON FUNCTION public.get_personal_game_stats(uuid) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.get_personal_game_stats(uuid) TO authenticated;
 
+-- Drafts are private to their owner; central drafts are admin-only.
+DROP POLICY IF EXISTS "Users can view central or own question bank" ON public.question_bank;
+CREATE POLICY "Users can view published central or own question bank"
+ON public.question_bank FOR SELECT TO authenticated
+USING (
+  (bank_scope='central' AND (status='published' OR public.has_role(auth.uid(),'admin')))
+  OR owner_id=auth.uid()
+  OR public.has_role(auth.uid(),'admin')
+);
+
 -- Backfill the first immutable version for every existing bank question.
 INSERT INTO public.question_bank_versions(
   question_id,version_no,question_text,options,correct_index,question_type,time_limit,
