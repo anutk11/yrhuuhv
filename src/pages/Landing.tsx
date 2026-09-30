@@ -68,14 +68,12 @@ const Landing = () => {
                 <Zap className="w-5 h-5" />
                 הצטרף למשחק
               </Button>
-              {isAdmin && (
-                <div className="flex gap-3 w-full sm:w-auto">
-                  <Button variant="secondary" size="lg" className="flex-1 sm:flex-initial text-base px-6 py-5" onClick={() => navigate("/admin/bank")}>
-                    <BookOpen className="w-5 h-5" />
-                    מאגר שאלות
-                  </Button>
-                </div>
-              )}
+              <div className="flex gap-3 w-full sm:w-auto">
+                <Button variant="secondary" size="lg" className="flex-1 sm:flex-initial text-base px-6 py-5" onClick={() => navigate("/bank")}>
+                  <BookOpen className="w-5 h-5" />
+                  מאגר שאלות
+                </Button>
+              </div>
             </>
           ) : (
             <>
