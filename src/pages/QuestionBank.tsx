@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  ArrowLeft, Plus, Search, Trash2, Edit2, FolderPlus, Folder, FolderOpen, BookOpen, Upload, Video, X, Save, FileSpreadsheet, ChevronLeft, ChevronDown, GripVertical, AlertTriangle, Tag, Copy, Sparkles,
+  ArrowLeft, Plus, Search, Trash2, Edit2, FolderPlus, Folder, FolderOpen, BookOpen, Upload, Video, X, Save, FileSpreadsheet, ChevronLeft, ChevronDown, GripVertical, AlertTriangle, Tag, Copy, Sparkles, Heart, Download,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -40,6 +40,8 @@ interface BankQuestion {
   owner_id: string | null;
   source_question_id?: string | null;
   media_path?: string | null;
+  status?: "draft" | "published" | "archived";
+  source_type?: "manual" | "ai" | "copied" | "saved_from_game" | "imported";
 }
 
 /* ─── Folder tree helpers ─── */
@@ -199,6 +201,9 @@ const QuestionBank = () => {
   const [deletingCategory, setDeletingCategory] = useState<string | null>(null);
   const [parentForNewFolder, setParentForNewFolder] = useState<string>("");
   const [showAI, setShowAI] = useState(false);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [saveAsDraft, setSaveAsDraft] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
 
   const [newQ, setNewQ] = useState({
@@ -219,7 +224,57 @@ const QuestionBank = () => {
   useEffect(() => {
     void loadQuestions();
     void loadPersistedFolders();
-  }, []);
+    void loadFavorites();
+  }, [user]);
+
+  const loadFavorites = async () => {
+    if (!user) return;
+    const { data } = await supabase.from("question_bank_favorites").select("question_id").eq("user_id", user.id);
+    setFavoriteIds(new Set((data || []).map((row: any) => row.question_id)));
+  };
+
+  const toggleFavorite = async (questionId: string) => {
+    if (!user) return;
+    const isFavorite = favoriteIds.has(questionId);
+    if (isFavorite) {
+      const { error } = await supabase.from("question_bank_favorites").delete().eq("user_id", user.id).eq("question_id", questionId);
+      if (error) { toast.error("לא ניתן להסיר מהמועדפים"); return; }
+      setFavoriteIds(prev => { const next = new Set(prev); next.delete(questionId); return next; });
+    } else {
+      const { error } = await supabase.from("question_bank_favorites").insert({ user_id: user.id, question_id: questionId });
+      if (error) { toast.error("לא ניתן להוסיף למועדפים"); return; }
+      setFavoriteIds(prev => new Set(prev).add(questionId));
+    }
+  };
+
+  const exportBank = (format: "json" | "csv") => {
+    const rows = scopedQuestions.map(q => ({
+      question_text: q.question_text,
+      options: q.options,
+      correct_index: q.correct_index,
+      question_type: q.question_type,
+      time_limit: q.time_limit,
+      category: q.category,
+      folder: q.folder,
+      status: q.status || "published",
+      source_type: q.source_type || "manual",
+    }));
+    const stamp = new Date().toISOString().slice(0,10);
+    let blob: Blob;
+    let name: string;
+    if (format === "json") {
+      blob = new Blob([JSON.stringify(rows, null, 2)], { type: "application/json;charset=utf-8" });
+      name = `trivia-bank-${bankView}-${stamp}.json`;
+    } else {
+      const csv = Papa.unparse(rows);
+      blob = new Blob(["\\ufeff", csv], { type: "text/csv;charset=utf-8" });
+      name = `trivia-bank-${bankView}-${stamp}.csv`;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
+    toast.success("המאגר יוצא בהצלחה");
+  };
 
   const loadPersistedFolders = async () => {
     const { data } = await supabase.from("question_folders").select("path, scope").order("path");
@@ -255,6 +310,8 @@ const QuestionBank = () => {
       owner_id: q.owner_id || null,
       media_url: q.media_path ? await signPrivateBankMedia(q.media_path) : q.media_url || null,
       media_path: q.media_path || null,
+      status: q.status || "published",
+      source_type: q.source_type || (q.source_question_id ? "copied" : "manual"),
     })));
     setQuestions(qs);
   };
@@ -309,6 +366,22 @@ const QuestionBank = () => {
 
   const saveQuestion = async () => {
     if (!newQ.question_text.trim() || newQ.options.some((o) => !o.trim()) || !user) return;
+
+    if (!editingId) {
+      const { data: duplicates, error: duplicateError } = await supabase.rpc("find_question_bank_duplicates", {
+        _question_id: crypto.randomUUID(),
+        _limit: 1,
+      });
+      // The duplicate RPC requires an existing id, so exact duplicate detection is also performed locally.
+      const localDuplicate = scopedQuestions.find(q =>
+        q.question_text.trim().replace(/\\s+/g, " ").toLowerCase() === newQ.question_text.trim().replace(/\\s+/g, " ").toLowerCase()
+        && q.id !== editingId
+      );
+      if (duplicateError && !localDuplicate) {
+        // Non-blocking: older databases may not yet have the RPC.
+      }
+      if (localDuplicate && !confirm("נמצאה שאלה עם אותו נוסח במאגר. לשמור בכל זאת?")) return;
+    }
     const editingQuestion = editingId ? questions.find((q) => q.id === editingId) : null;
     const editingCentral = !!editingQuestion && editingQuestion.bank_scope === "central";
     if (editingCentral && !isAdmin) {
@@ -333,6 +406,8 @@ const QuestionBank = () => {
       bank_scope: editingCentral || (!editingId && bankView === "central" && isAdmin) ? "central" : "private",
       owner_id: editingCentral || (!editingId && bankView === "central" && isAdmin) ? null : user.id,
       source_question_id: editingCentral ? (editingQuestion?.source_question_id ?? null) : null,
+      status: editingId ? (editingQuestion?.status || "published") : (saveAsDraft ? "draft" : "published"),
+      source_type: editingId ? (editingQuestion?.source_type || "manual") : "manual",
     };
     if (editingId) {
       const { created_by, bank_scope, owner_id, source_question_id, ...updatePayload } = payload;
@@ -379,6 +454,8 @@ const QuestionBank = () => {
       media_url: mediaUrl,
       media_path: null,
       media_type: q.media_type || "none",
+      status: "published",
+      source_type: "copied",
       image_view_time: q.image_view_time ?? 5,
       keep_image: q.keep_image ?? false,
     } as any);
@@ -436,6 +513,8 @@ const QuestionBank = () => {
       media_url: mediaPath ? null : mediaUrl,
       media_path: mediaPath,
       media_type: q.media_type || "none",
+      status: "published",
+      source_type: "copied",
       image_view_time: q.image_view_time ?? 5,
       keep_image: q.keep_image ?? false,
     } as any);
@@ -649,8 +728,10 @@ const QuestionBank = () => {
   const filtered = scopedQuestions.filter((q) => {
     const matchFolder = selectedFolder === "הכל" || q.folder === selectedFolder || q.folder.startsWith(selectedFolder + SEPARATOR);
     const matchCategory = selectedCategory === "הכל" || q.category === selectedCategory;
-    const matchSearch = !searchText || q.question_text.includes(searchText);
-    return matchFolder && matchCategory && matchSearch;
+    const haystack = [q.question_text, q.category, q.folder, ...(q.options || [])].join(" ").toLowerCase();
+    const matchSearch = !searchText || haystack.includes(searchText.toLowerCase());
+    const matchFavorite = !favoritesOnly || favoriteIds.has(q.id);
+    return matchFolder && matchCategory && matchSearch && matchFavorite;
   });
 
   /* ─── All folder paths for the folder selector in form ─── */
@@ -814,7 +895,17 @@ const QuestionBank = () => {
             {/* Search */}
             <div className="relative mb-6">
               <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="חיפוש שאלות..." value={searchText} onChange={(e) => setSearchText(e.target.value)} className="bg-secondary border-border pr-10" />
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input placeholder="חיפוש בשאלה, תשובות, קטגוריה או תיקייה..." value={searchText} onChange={(e) => setSearchText(e.target.value)} className="bg-secondary border-border pr-10" />
+                </div>
+                <Button variant={favoritesOnly ? "neon" : "outline"} size="sm" onClick={() => setFavoritesOnly(v => !v)} title="מועדפים">
+                  <Heart className="w-4 h-4" /> מועדפים
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => exportBank("json")} title="גיבוי JSON"><Download className="w-4 h-4" /> JSON</Button>
+                <Button variant="outline" size="sm" onClick={() => exportBank("csv")} title="ייצוא CSV"><FileSpreadsheet className="w-4 h-4" /> CSV</Button>
+              </div>
             </div>
 
             {/* Question Form */}
@@ -912,6 +1003,10 @@ const QuestionBank = () => {
                     </div>
                   </div>
 
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={saveAsDraft} onChange={(e) => setSaveAsDraft(e.target.checked)} className="accent-primary" />
+                    שמור כטיוטה
+                  </div>
                   <div className="flex gap-2">
                     <Button variant="neon" size="sm" onClick={saveQuestion}>
                       <Save className="w-3.5 h-3.5" />
@@ -953,8 +1048,11 @@ const QuestionBank = () => {
                         <span className="text-[10px] text-muted-foreground">{q.category}</span>
                         <span className="text-[10px] text-muted-foreground">{q.time_limit} שנ׳</span>
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${q.bank_scope === "central" ? "bg-amber-500/15 text-amber-300" : "bg-primary/10 text-primary"}`}>{q.bank_scope === "central" ? "מרכזי" : "שלי"}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground">{q.source_type === "ai" ? "AI" : q.source_type === "copied" ? "הועתקה" : q.source_type === "saved_from_game" ? "נשמרה ממשחק" : q.source_type === "imported" ? "ייבוא" : "ידנית"}</span>
+                        {q.status === "draft" && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500/15 text-yellow-300">טיוטה</span>}
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => toggleFavorite(q.id)} className={`p-1 ${favoriteIds.has(q.id) ? "text-rose-400" : "text-muted-foreground hover:text-rose-400"}`} title="מועדפים"><Heart className="w-3.5 h-3.5" fill={favoriteIds.has(q.id) ? "currentColor" : "none"} /></button>
                         <button onClick={() => duplicateBankQuestion(q)} className="text-muted-foreground hover:text-primary p-1" title={q.bank_scope === "central" ? "העתק למאגר שלי" : "שכפל"}><Copy className="w-3.5 h-3.5" /></button>
                         {(q.bank_scope === "private" || isAdmin) && (
                           <>
