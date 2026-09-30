@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Shield, Users, History, RefreshCw } from "lucide-react";
+import { ArrowLeft, Shield, Users, History, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -57,6 +57,21 @@ const AdminManagement = () => {
     if (isAdmin) void load();
     else setLoading(false);
   }, [isAdmin]);
+
+  const deleteUser = async (targetId: string, label: string) => {
+    if (!user || targetId === user.id) {
+      toast.error("אי אפשר למחוק את המשתמש הנוכחי");
+      return;
+    }
+    if (!confirm(`למחוק לצמיתות את המשתמש "${label}" ואת הנתונים השייכים אליו? פעולה זו אינה הפיכה.`)) return;
+    const { error } = await supabase.rpc("admin_delete_user" as any, { _user_id: targetId });
+    if (error) {
+      toast.error("שגיאה במחיקת המשתמש: " + error.message);
+      return;
+    }
+    toast.success("המשתמש נמחק");
+    await load();
+  };
 
   const setRole = async (targetId: string, role: "admin" | "user") => {
     if (!user || targetId === user.id && role === "user") {
@@ -132,6 +147,9 @@ const AdminManagement = () => {
                           <Shield className="w-3.5 h-3.5" /> מנהל
                         </Button>
                       )}
+                      <Button variant="ghost" size="sm" disabled={item.user_id === user?.id} onClick={() => void deleteUser(item.user_id, item.nickname || item.display_name || item.email)}>
+                        <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                      </Button>
                     </div>
                   </div>
                 </div>
