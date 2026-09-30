@@ -260,6 +260,13 @@ const QuestionBank = () => {
 
   const saveQuestion = async () => {
     if (!newQ.question_text.trim() || newQ.options.some((o) => !o.trim()) || !user) return;
+    const editingQuestion = editingId ? questions.find((q) => q.id === editingId) : null;
+    const editingCentral = !!editingQuestion && editingQuestion.bank_scope === "central";
+    if (editingCentral && !isAdmin) {
+      toast.error("רק מנהל יכול לערוך שאלה מרכזית");
+      return;
+    }
+
     const payload = {
       question_text: newQ.question_text,
       options: newQ.options,
@@ -272,13 +279,13 @@ const QuestionBank = () => {
       media_type: newQ.media_type || "none",
       image_view_time: newQ.image_view_time,
       keep_image: newQ.keep_image,
-      created_by: user.id,
-      bank_scope: "private",
-      owner_id: user.id,
-      source_question_id: null,
+      created_by: editingCentral ? (editingQuestion?.owner_id ?? user.id) : user.id,
+      bank_scope: editingCentral ? "central" : "private",
+      owner_id: editingCentral ? null : user.id,
+      source_question_id: editingCentral ? (editingQuestion?.source_question_id ?? null) : null,
     };
     if (editingId) {
-      const { created_by, ...updatePayload } = payload;
+      const { created_by, bank_scope, owner_id, source_question_id, ...updatePayload } = payload;
       const { error } = await supabase.from("question_bank").update(updatePayload as any).eq("id", editingId);
       if (error) { toast.error("שגיאה בעדכון"); return; }
       toast.success("השאלה עודכנה");
