@@ -75,6 +75,8 @@ const AIQuestionGenerator = ({ open, onOpenChange, folders, categories, defaultF
         time_limit: timeLimit,
         folder: folder || "כללי",
         category: category.trim() || "כללי",
+        status: "draft",
+        source_type: "ai",
       }));
     if (rows.length === 0) { toast.error("אין שאלות תקינות לשמירה"); return; }
     setSaving(true);
