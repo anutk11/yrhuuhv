@@ -266,7 +266,10 @@ export function useGameSync(roomId: string | null) {
       }
     };
 
-    const interval = window.setInterval(resyncRoom, 3000);
+    const interval = window.setInterval(resyncRoom, 5000);
+    const heartbeat = window.setInterval(() => {
+      if (roomId && user?.id) void supabase.rpc("host_heartbeat", { _room_id: roomId });
+    }, 15000);
 
     window.addEventListener("focus", resyncRoom);
     window.addEventListener("online", resyncRoom);
@@ -274,6 +277,7 @@ export function useGameSync(roomId: string | null) {
 
     return () => {
       window.clearInterval(interval);
+      window.clearInterval(heartbeat);
       window.removeEventListener("focus", resyncRoom);
       window.removeEventListener("online", resyncRoom);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -321,20 +325,7 @@ export function useGameSync(roomId: string | null) {
     });
 
     if (error) {
-      // Fallback for host if RPC fails unexpectedly
-      if (room.host_id === user?.id) {
-        const { error: fallbackError } = await supabase
-          .from("game_rooms")
-          .update({ current_question_index: index })
-          .eq("id", roomId);
-
-        if (fallbackError) return false;
-
-        setRoom((prev) => prev ? { ...prev, current_question_index: index } : prev);
-        setMyAnswer(null);
-        answerStartRef.current = Date.now();
-        return true;
-      }
+      toast.error("שגיאה בסנכרון השאלה");
       return false;
     }
 
