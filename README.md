@@ -71,3 +71,43 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+
+
+## New Supabase setup
+
+The application is designed to work with a fresh Supabase project. The repository contains the database migrations under `supabase/migrations`, including RLS policies, private/central question banks, room gameplay, phone + Google participation, realtime answer events, and durable game-history snapshots.
+
+After creating a Supabase project:
+
+1. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in the application's environment.
+2. Apply all migrations with the Supabase CLI using `supabase db push` after linking the project.
+3. Deploy the Edge Functions under `supabase/functions`.
+4. Configure the required Edge Function secrets, including `YEMOT_WEBHOOK_TOKEN` and any AI provider key used by `generate-questions`.
+
+### Bootstrap the first administrator
+
+New signups receive the `user` role by default. To make the first account an administrator, run this in the Supabase SQL editor after that account has signed up:
+
+```sql
+INSERT INTO public.user_roles (user_id, role)
+SELECT id, 'admin'::public.app_role
+FROM auth.users
+WHERE email = 'YOUR_EMAIL_HERE'
+ON CONFLICT (user_id, role) DO NOTHING;
+```
+
+The administrator can then manage roles from **ניהול מערכת**.
+
+### Data model
+
+- **Private question bank**: owned by one user and protected by RLS.
+- **Central question bank**: visible to authenticated users and editable only by administrators.
+- **Game questions**: copied into the room as independent rows and never mutate the source bank question.
+- **Game history snapshots**: preserve participants, questions, and answers exactly as they were when the game finished.
+- **Game templates**: owned by the creator.
+- **Question media**: uploads are scoped to the owning user's storage path for personal assets.
+- **Audit log**: records question-bank changes for administrator review.
+
+### User experience
+
+Authenticated users can create games, invite Google players, use the central bank, manage their private bank, generate questions with AI, and view their own game history. Administrators additionally manage the central bank, user roles, phone roster, and audit log.
