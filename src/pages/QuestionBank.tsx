@@ -238,11 +238,11 @@ const QuestionBank = () => {
     if (!user) return;
     const isFavorite = favoriteIds.has(questionId);
     if (isFavorite) {
-      const { error } = await supabase.from("question_bank_favorites").delete().eq("user_id", user.id).eq("question_id", questionId);
+      const { error } = await supabase.from("question_bank_favorites" as any).delete().eq("user_id", user.id).eq("question_id", questionId);
       if (error) { toast.error("לא ניתן להסיר מהמועדפים"); return; }
       setFavoriteIds(prev => { const next = new Set(prev); next.delete(questionId); return next; });
     } else {
-      const { error } = await supabase.from("question_bank_favorites").insert({ user_id: user.id, question_id: questionId });
+      const { error } = await supabase.from("question_bank_favorites" as any).insert({ user_id: user.id, question_id: questionId });
       if (error) { toast.error("לא ניתן להוסיף למועדפים"); return; }
       setFavoriteIds(prev => new Set(prev).add(questionId));
     }
@@ -692,7 +692,6 @@ const QuestionBank = () => {
 
   const processImportRows = async (rows: any[]) => {
     if (!user) return;
-        const rows = results.data as any[];
         const payload: any[] = [];
         let skipped = 0;
 
