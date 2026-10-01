@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { calculateScore } from "@/lib/scoring";
 import { toast } from "sonner";
 
 export interface GameQuestion {
@@ -23,15 +22,28 @@ export interface PlayerScore {
   nickname: string;
   score: number;
   is_connected: boolean;
+  is_phone?: boolean;
 }
 
-interface GameRoom {
+export interface LeaderboardRow {
+  user_id: string;
+  display_name: string;
+  score: number;
+  rank: number;
+  total_players: number;
+  is_me: boolean;
+}
+
+export interface GameRoom {
   id: string;
   status: string;
   current_question_index: number;
   current_phase: string;
   phase_started_at: string | null;
+  phase_ends_at: string | null;
   phase_duration_seconds: number;
+  paused_remaining_ms?: number | null;
+  phase_elapsed_before_pause_ms?: number;
   host_id: string;
   settings: {
     correctness_weight: number;
@@ -39,6 +51,7 @@ interface GameRoom {
     default_time_limit: number;
     result_display_seconds?: number;
     leaderboard_display_seconds?: number;
+    allow_late_press?: boolean;
     bg_music_url?: string;
     correct_sound_url?: string;
     wrong_sound_url?: string;
@@ -52,17 +65,21 @@ const DEFAULT_ROOM_SETTINGS: GameRoom["settings"] = {
   default_time_limit: 15,
   result_display_seconds: 5,
   leaderboard_display_seconds: 5,
+  allow_late_press: true,
 };
 
 function mapRoomData(data: any, previousRoom?: GameRoom | null): GameRoom {
   return {
     id: data.id,
-    status: data.status,
+    status: data.status ?? previousRoom?.status ?? "waiting",
     host_id: data.host_id ?? previousRoom?.host_id ?? "",
     current_question_index: data.current_question_index ?? -1,
     current_phase: data.current_phase ?? "idle",
     phase_started_at: data.phase_started_at ?? null,
+    phase_ends_at: data.phase_ends_at ?? null,
     phase_duration_seconds: data.phase_duration_seconds ?? 0,
+    paused_remaining_ms: data.paused_remaining_ms ?? null,
+    phase_elapsed_before_pause_ms: data.phase_elapsed_before_pause_ms ?? 0,
     settings: {
       ...DEFAULT_ROOM_SETTINGS,
       ...((data.settings as Partial<GameRoom["settings"]> | null | undefined) ?? {}),
@@ -76,226 +93,245 @@ export function useGameSync(roomId: string | null) {
   const [questions, setQuestions] = useState<GameQuestion[]>([]);
   const [players, setPlayers] = useState<PlayerScore[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [myAnswer, setMyAnswer] = useState<number | null>(null);
   const answerStartRef = useRef(0);
 
-  // Fetch room data
   const fetchRoom = useCallback(async () => {
-    if (!roomId) return;
-    const { data } = await supabase
+    if (!roomId) return false;
+    const { data, error } = await supabase
       .from("game_rooms")
-      .select("id, status, current_question_index, current_phase, phase_started_at, phase_duration_seconds, settings, host_id")
+      .select("id,status,current_question_index,current_phase,phase_started_at,phase_ends_at,phase_duration_seconds,paused_remaining_ms,phase_elapsed_before_pause_ms,settings,host_id")
       .eq("id", roomId)
-      .single();
-    if (data) {
-      setRoom((prev) => mapRoomData(data, prev));
+      .maybeSingle();
+
+    if (error) {
+      setLoadError("לא ניתן לטעון את המשחק");
+      return false;
     }
+    if (!data) {
+      setLoadError("החדר לא נמצא או שאינך מחובר אליו");
+      return false;
+    }
+
+    setRoom((prev) => mapRoomData(data, prev));
+    setLoadError(null);
+    return true;
   }, [roomId]);
 
-  // Fetch questions
   const fetchQuestions = useCallback(async () => {
-    if (!roomId) return;
-    const { data } = await supabase
+    if (!roomId) return false;
+    const { data, error } = await supabase
       .from("public_questions" as any)
       .select("*")
       .eq("room_id", roomId)
       .order("sort_order");
-    if (data) {
-      setQuestions(
-        data.map((q: any) => ({
-          id: q.id,
-          text: q.question_text,
-          options: (q.options as string[]) || [],
-          correctIndex: q.correct_index ?? -1,
-          timeLimit: q.time_limit,
-          type: q.question_type as "trivia" | "survey",
-          mediaUrl: q.media_url || "",
-          mediaType: q.media_type || "none",
-          imageViewTime: q.image_view_time ?? 5,
-          keepImage: q.keep_image ?? false,
-        }))
-      );
-    }
+
+    if (error) return false;
+
+    setQuestions(
+      (data ?? []).map((q: any) => ({
+        id: q.id,
+        text: q.question_text,
+        options: (q.options as string[]) || [],
+        correctIndex: q.correct_index ?? -1,
+        timeLimit: q.time_limit,
+        type: q.question_type as "trivia" | "survey",
+        mediaUrl: q.media_url || "",
+        mediaType: q.media_type || "none",
+        imageViewTime: q.image_view_time ?? 5,
+        keepImage: q.keep_image ?? false,
+      })),
+    );
+    return true;
   }, [roomId]);
 
-  // Fetch players with scores
   const fetchPlayers = useCallback(async () => {
-    if (!roomId) return;
-    const { data } = await supabase
-      .from("room_players")
-      .select("user_id, is_connected, score")
-      .eq("room_id", roomId);
-    if (!data) return;
-
-    const { data: profilesData } = await supabase
-      .from("room_player_profiles" as any)
-      .select("user_id, display_name, nickname")
-      .eq("room_id", roomId);
-    const profileMap = new Map((profilesData || []).map((p: any) => [p.user_id, p]));
+    if (!roomId) return false;
+    const { data, error } = await supabase.rpc("get_room_players" as any, { _room_id: roomId });
+    if (error) return false;
 
     setPlayers(
-      data.map((p: any) => {
-        const prof: any = profileMap.get(p.user_id);
-        return {
-          user_id: p.user_id,
-          display_name: prof?.display_name || "אורח",
-          nickname: prof?.nickname || "",
-          score: p.score,
-          is_connected: p.is_connected,
-        };
-      })
+      (Array.isArray(data) ? data : []).map((p: any) => ({
+        user_id: p.user_id,
+        display_name: p.display_name || "אורח",
+        nickname: p.nickname || "",
+        score: Number(p.score ?? 0),
+        is_connected: Boolean(p.is_connected),
+        is_phone: Boolean(p.is_phone),
+      })),
     );
+    return true;
   }, [roomId]);
 
-  // Check if already answered current question
+  const fetchLeaderboard = useCallback(async (limit = 10): Promise<LeaderboardRow[]> => {
+    if (!roomId) return [];
+    const { data, error } = await supabase.rpc("get_leaderboard" as any, {
+      _room_id: roomId,
+      _limit: limit,
+    });
+    if (error) return [];
+    return (Array.isArray(data) ? data : []).map((r: any) => ({
+      user_id: r.user_id,
+      display_name: r.display_name || "שחקן",
+      score: Number(r.score ?? 0),
+      rank: Number(r.rank ?? 0),
+      total_players: Number(r.total_players ?? 0),
+      is_me: Boolean(r.is_me),
+    }));
+  }, [roomId]);
+
   const checkMyAnswer = useCallback(async (questionId: string) => {
-    if (!user) return;
+    if (!user || !roomId) return;
     const { data } = await supabase
       .from("game_answers")
       .select("selected_index")
+      .eq("room_id", roomId)
       .eq("question_id", questionId)
       .eq("user_id", user.id)
       .maybeSingle();
     setMyAnswer(data?.selected_index ?? null);
-  }, [user]);
+  }, [roomId, user]);
 
-  // Initial load
-  useEffect(() => {
+  const reloadAll = useCallback(async () => {
     if (!roomId) return;
-    const load = async () => {
-      await Promise.all([fetchRoom(), fetchQuestions(), fetchPlayers()]);
-      setLoading(false);
-    };
-    load();
+    setLoading(true);
+    const results = await Promise.all([fetchRoom(), fetchQuestions(), fetchPlayers()]);
+    if (!results[0]) {
+      setLoadError("לא ניתן לטעון את המשחק");
+    }
+    setLoading(false);
   }, [roomId, fetchRoom, fetchQuestions, fetchPlayers]);
 
-  // Check answer when question changes
+  useEffect(() => {
+    void reloadAll();
+  }, [reloadAll]);
+
   useEffect(() => {
     if (!room || room.current_question_index < 0 || questions.length === 0) return;
     const q = questions[room.current_question_index];
-    if (q) {
-      checkMyAnswer(q.id);
-      answerStartRef.current = room.current_phase === "answering" && room.phase_started_at
+    if (!q) return;
+    void checkMyAnswer(q.id);
+    answerStartRef.current =
+      room.current_phase === "answering" && room.phase_started_at
         ? new Date(room.phase_started_at).getTime()
         : Date.now();
-    }
   }, [room?.current_question_index, room?.current_phase, room?.phase_started_at, questions, checkMyAnswer]);
 
-  // Realtime subscriptions
   useEffect(() => {
     if (!roomId) return;
 
-    const channel = supabase
-      .channel(`game-sync-${roomId}`)
-      .on("postgres_changes", {
-        event: "UPDATE",
-        schema: "public",
-        table: "game_rooms",
-        filter: `id=eq.${roomId}`,
-      }, (payload) => {
-        const d = payload.new as any;
-        setRoom((prev) => {
-          const nextRoom = mapRoomData(d, prev);
-          const questionChanged = !prev || d.current_question_index !== prev.current_question_index;
-          const phaseChanged = !prev || d.current_phase !== prev.current_phase;
+    let disposed = false;
 
-          if (questionChanged) {
-            setMyAnswer(null);
-          }
+    const setup = async () => {
+      await supabase.realtime.setAuth();
+      if (disposed) return;
 
-          if (questionChanged || phaseChanged) {
-            answerStartRef.current = nextRoom.current_phase === "answering" && nextRoom.phase_started_at
-              ? new Date(nextRoom.phase_started_at).getTime()
-              : Date.now();
-            // Refetch questions so correct_index becomes visible once the reveal phase starts
+      const channel = supabase
+        .channel(`room:${roomId}`, { config: { private: true } })
+        .on("broadcast", { event: "room_state" }, (payload) => {
+          const d = payload?.payload ?? {};
+          if (!d || disposed) return;
+          setRoom((prev) => {
+            const next = mapRoomData({
+              ...(prev ?? {}),
+              id: roomId,
+              status: d.status,
+              current_phase: d.phase,
+              current_question_index: d.question_index,
+              phase_started_at: d.phase_started_at ?? null,
+              phase_ends_at: d.phase_ends_at ?? null,
+              phase_duration_seconds: d.phase_duration_seconds ?? 0,
+              paused_remaining_ms: d.paused_remaining_ms ?? null,
+              phase_elapsed_before_pause_ms: d.phase_elapsed_before_pause_ms ?? 0,
+              host_id: prev?.host_id,
+              settings: prev?.settings,
+            }, prev);
+            return next;
+          });
+
+          const phase = String(d.phase ?? "");
+          if (phase === "result" || phase === "survey-result" || phase === "leaderboard" || phase === "stats") {
+            void fetchQuestions();
+          } else if (d.question_index !== undefined) {
             void fetchQuestions();
           }
-
-          return nextRoom;
-        });
-      })
-      .on("postgres_changes", {
-        event: "*",
-        schema: "public",
-        table: "room_players",
-        filter: `room_id=eq.${roomId}`,
-      }, () => {
-        fetchPlayers();
-      })
-      .on("postgres_changes", {
-        event: "INSERT",
-        schema: "public",
-        table: "game_answers",
-        filter: `room_id=eq.${roomId}`,
-      }, () => {
-        // Refresh players to get updated scores
-        fetchPlayers();
-      })
-      .on("postgres_changes", {
-        event: "*",
-        schema: "public",
-        table: "questions",
-        filter: `room_id=eq.${roomId}`,
-      }, () => {
-        fetchQuestions();
-      })
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          void fetchRoom();
-          void fetchQuestions();
+        })
+        .on("broadcast", { event: "room_presence" }, () => {
           void fetchPlayers();
-        }
-      });
+        })
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            void reloadAll();
+          }
+        });
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    };
+
+    let cleanup: (() => void) | undefined;
+    void setup().then((fn) => {
+      cleanup = fn;
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      disposed = true;
+      cleanup?.();
     };
-  }, [roomId, fetchPlayers, fetchQuestions, fetchRoom]);
+  }, [roomId, reloadAll, fetchPlayers, fetchQuestions]);
 
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || !user?.id) return;
 
-    const resyncRoom = () => {
+    const resync = () => {
       void fetchRoom();
+      void fetchQuestions();
       void fetchPlayers();
     };
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        resyncRoom();
-      }
-    };
+    void supabase.rpc("set_my_presence" as any, {
+      _room_id: roomId,
+      _connected: true,
+    });
 
-    const interval = window.setInterval(resyncRoom, 5000);
     const heartbeat = window.setInterval(() => {
-      if (roomId && user?.id) void supabase.rpc("host_heartbeat" as any, { _room_id: roomId });
-    }, 15000);
+      void supabase.rpc("set_my_presence" as any, {
+        _room_id: roomId,
+        _connected: true,
+      });
+    }, 30000);
 
-    window.addEventListener("focus", resyncRoom);
-    window.addEventListener("online", resyncRoom);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", resync);
+    window.addEventListener("online", resync);
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") resync();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
-      window.clearInterval(interval);
       window.clearInterval(heartbeat);
-      window.removeEventListener("focus", resyncRoom);
-      window.removeEventListener("online", resyncRoom);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", resync);
+      window.removeEventListener("online", resync);
+      document.removeEventListener("visibilitychange", onVisibility);
+      void supabase.rpc("set_my_presence" as any, {
+        _room_id: roomId,
+        _connected: false,
+      });
     };
-  }, [roomId, fetchRoom]);
+  }, [roomId, user?.id, fetchRoom, fetchQuestions, fetchPlayers]);
 
-  // Submit answer
   const submitAnswer = useCallback(async (selectedIndex: number) => {
-    if (!user || !room || !roomId || myAnswer !== null) return;
-    
-    const qIndex = room.current_question_index;
-    const question = questions[qIndex];
-    if (!question) return;
+    if (!user || !room || !roomId || myAnswer !== null) return undefined;
+
+    const question = questions[room.current_question_index];
+    if (!question) return undefined;
 
     setMyAnswer(selectedIndex);
 
-    // Server-authoritative scoring; browser never sends score or answer time.
-    const { data, error: ansError } = await supabase.functions.invoke("submit-answer", {
+    const { data, error } = await supabase.functions.invoke("submit-answer", {
       body: {
         room_id: roomId,
         question_id: question.id,
@@ -303,19 +339,21 @@ export function useGameSync(roomId: string | null) {
       },
     });
 
-    if (ansError || !data?.ok) {
-      toast.error(ansError?.message || "שגיאה בשמירת תשובה");
+    if (error || !data?.ok) {
+      toast.error(error?.message || data?.error || "שגיאה בשמירת תשובה");
       setMyAnswer(null);
-      return;
+      return undefined;
     }
 
-    return Number(data.score ?? 0);
+    return {
+      score: Number(data.score ?? 0),
+      isCorrect: question.type === "survey" ? null : Boolean(data.is_correct),
+      answerTimeMs: Number(data.answer_time_ms ?? 0),
+    };
   }, [user, room, roomId, questions, myAnswer]);
 
-  // Advance to next question (atomic so all clients stay in sync)
   const advanceQuestion = useCallback(async (index: number, expectedFromIndex?: number) => {
     if (!roomId || !room) return false;
-
     const fromIndex = expectedFromIndex ?? room.current_question_index;
 
     const { data, error } = await supabase.rpc("advance_room_question", {
@@ -329,32 +367,9 @@ export function useGameSync(roomId: string | null) {
       return false;
     }
 
-    const moved = !!data;
-    if (moved) {
-      setRoom((prev) => prev ? { ...prev, current_question_index: index } : prev);
-      setMyAnswer(null);
-      answerStartRef.current = Date.now();
-      return true;
-    }
+    return Boolean(data);
+  }, [roomId, room]);
 
-    // RPC can return false on duplicate/racing transitions; treat "already moved" as success.
-    const { data: latestRoom } = await supabase
-      .from("game_rooms")
-      .select("current_question_index")
-      .eq("id", roomId)
-      .maybeSingle();
-
-    if (latestRoom?.current_question_index === index) {
-      setRoom((prev) => prev ? { ...prev, current_question_index: index } : prev);
-      setMyAnswer(null);
-      answerStartRef.current = Date.now();
-      return true;
-    }
-
-    return false;
-  }, [roomId, room, user?.id]);
-
-  // Rewind is atomic in the database.
   const rewindQuestion = useCallback(async (targetIndex: number) => {
     if (!roomId || targetIndex < 0) return false;
     const targetQ = questions[targetIndex];
@@ -370,43 +385,45 @@ export function useGameSync(roomId: string | null) {
       return false;
     }
 
-    setRoom((prev) => prev ? {
-      ...prev,
-      current_question_index: targetIndex,
-      current_phase: "reading",
-      status: "playing",
-    } : prev);
-    setMyAnswer(null);
-    void fetchPlayers();
+    await fetchRoom();
+    await fetchQuestions();
+    await fetchPlayers();
     return true;
-  }, [roomId, questions, fetchPlayers]);
+  }, [roomId, questions, fetchRoom, fetchQuestions, fetchPlayers]);
 
-  // Admin: set game status
-  const setGameStatus = useCallback(async (status: string, extra: Record<string, unknown> = {}) => {
-    if (!roomId) return;
-    const { error } = await supabase.from("game_rooms").update({ status, ...extra }).eq("id", roomId);
-    if (!error) {
-      await fetchRoom();
+  const setGameStatus = useCallback(async (status: "paused" | "playing") => {
+    if (!roomId) return false;
+    const { data, error } = await supabase.rpc("host_set_game_status" as any, {
+      _room_id: roomId,
+      _status: status,
+    });
+    if (error) {
+      toast.error(error.message || "שגיאה בעדכון מצב המשחק");
+      return false;
     }
-  }, [roomId, fetchRoom]);
-
-  const currentQuestion = room && room.current_question_index >= 0 
-    ? questions[room.current_question_index] 
-    : null;
+    return Boolean(data);
+  }, [roomId]);
 
   return {
     room,
     questions,
     players,
-    currentQuestion,
+    currentQuestion:
+      room && room.current_question_index >= 0
+        ? questions[room.current_question_index] ?? null
+        : null,
     currentQuestionIndex: room?.current_question_index ?? -1,
     myAnswer,
     loading,
+    loadError,
+    reloadAll,
     submitAnswer,
     advanceQuestion,
     rewindQuestion,
     setGameStatus,
     fetchRoom,
     fetchPlayers,
+    fetchQuestions,
+    fetchLeaderboard,
   };
 }
