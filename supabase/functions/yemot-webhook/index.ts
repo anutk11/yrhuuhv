@@ -200,34 +200,15 @@ Deno.serve(async (req) => {
         return textResponse(gameWaitingResponse(await issueNextParam()));
       }
 
-      // A returning caller (fresh call, no answer tokens in the URL): if they
-      // already answered the active question, tell them it was received and
-      // let them wait; otherwise hand out a fresh keypad read immediately.
+      // The active-room RPC already includes the answered flag and pending token,
+      // so no extra room/question/answer reads are needed here.
       const hasAnyAnswerToken = Array.from(url.searchParams.keys()).some((k) => /^a\d+x/i.test(k));
       if (!hasAnyAnswerToken && !url.searchParams.get("idle") && currentIdx >= 0) {
-        const { data: curQ } = await supabase
-          .from("questions").select("id")
-          .eq("room_id", roomId).eq("sort_order", currentIdx).maybeSingle();
-        if (curQ?.id) {
-          const { data: already } = await supabase
-            .from("game_answers").select("id")
-            .eq("room_id", roomId).eq("question_id", curQ.id).eq("user_id", userId).maybeSingle();
-          console.log(`[${reqId}] reconnect qIdx=${currentIdx} answered=${!!already} phase=${room.current_phase}`);
-          if (already) return textResponse(answerReceivedResponse(await issueNextParam()));
-        }
+        if (room._answered_current) return textResponse(answerReceivedResponse(await issueNextParam()));
         return textResponse(gamePlayingResponse(await issueNextParam()));
       }
 
-      // playing — read the value from the variable we issued last time
-      const { data: callState } = await supabase
-        .from("phone_call_state")
-        .select("pending_param")
-        .eq("room_id", roomId)
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      const expectedParam: string | null = callState?.pending_param ?? room._pending_param ?? null;
-
+      const expectedParam: string | null = room._pending_param ?? null;
       // Yemot may submit a keypress from the immediately preceding `read`
       // after a timeout/re-poll has already replaced pending_param in the DB.
       // Read the actual one-time answer variable carried by this request rather
