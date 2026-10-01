@@ -10,6 +10,10 @@ import QRInvite from "@/components/game/QRInvite";
 import InvitePlayers from "@/components/game/InvitePlayers";
 import ConnectedPlayers from "@/components/game/ConnectedPlayers";
 import ThemeToggle from "@/components/ThemeToggle";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import RosterUpload from "@/components/game/RosterUpload";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -225,7 +229,13 @@ const AdminDashboard = () => {
   };
 
   const archiveRoom = async (id: string) => {
-    if (!confirm("בטוח שברצונך למחוק את החדר הזה? פעולה זו אינה הפיכה.")) return;
+    setArchiveTarget(id);
+  };
+
+  const deleteRoomConfirmed = async () => {
+    if (!archiveTarget) return;
+    const id = archiveTarget;
+    setArchiveTarget(null);
     const { error } = await supabase
       .from("game_rooms")
       .delete()
@@ -704,8 +714,10 @@ const AdminDashboard = () => {
   };
 
   const [showStartChoice, setShowStartChoice] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<string | null>(null);
+  const [warningStartMode, setWarningStartMode] = useState<"observer" | "player" | null>(null);
 
-  const startGame = async (mode: "observer" | "player") => {
+  const startGame = async (mode: "observer" | "player", skipWarnings = false) => {
     if (!roomId || questions.length === 0) {
       toast.error("הוסף שאלות לפני תחילת המשחק");
       return;
@@ -724,7 +736,8 @@ const AdminDashboard = () => {
       return;
     }
     const warnings = Array.isArray(validation.warnings) ? validation.warnings : [];
-    if (warnings.length && !confirm(`אזהרות לפני התחלה:\n\n${warnings.join("\n")}\n\nלהתחיל בכל זאת?`)) {
+    if (warnings.length && !skipWarnings) {
+      setWarningStartMode(mode);
       return;
     }
     
@@ -1351,6 +1364,38 @@ const AdminDashboard = () => {
           </div>
         </div>
       </div>
+
+      <AlertDialog open={archiveTarget !== null} onOpenChange={(open) => !open && setArchiveTarget(null)}>
+        <AlertDialogContent dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>למחוק את החדר?</AlertDialogTitle>
+            <AlertDialogDescription>פעולה זו אינה הפיכה.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void deleteRoomConfirmed()}>מחיקה</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={warningStartMode !== null} onOpenChange={(open) => !open && setWarningStartMode(null)}>
+        <AlertDialogContent dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>יש אזהרות לפני ההתחלה</AlertDialogTitle>
+            <AlertDialogDescription>
+              המשחק מכיל אזהרות בדיקת תקינות. ניתן להתחיל בכל זאת, אך מומלץ לבדוק אותן לפני תחילת המשחק.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              const mode = warningStartMode;
+              setWarningStartMode(null);
+              if (mode) void startGame(mode, true);
+            }}>התחל בכל זאת</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Question preview modal — mirrors the live telephone game screen */}
       <AnimatePresence>
