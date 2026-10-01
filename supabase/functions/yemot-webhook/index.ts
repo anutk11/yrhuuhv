@@ -77,9 +77,23 @@ async function rememberPendingParam(
   return nextParam;
 }
 
+function constantTimeEqual(a: string, b: string): boolean {
+  const aa = new TextEncoder().encode(a);
+  const bb = new TextEncoder().encode(b);
+  let diff = aa.length ^ bb.length;
+  const n = Math.max(aa.length, bb.length);
+  for (let i = 0; i < n; i++) diff |= (aa[i] ?? 0) ^ (bb[i] ?? 0);
+  return diff === 0;
+}
+
 function phoneToUserId(phone: string): string {
   const digits = phone.replace(/\D/g, "").slice(-12).padStart(12, "0");
   return `00000000-0000-0000-0000-${digits}`;
+}
+
+function maskPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length > 4 ? "••••" + digits.slice(-4) : "••••";
 }
 
 function textResponse(body: string, status = 200): Response {
@@ -109,16 +123,17 @@ Deno.serve(async (req) => {
   });
 
   // ---- Shared-secret authentication ----
-  // Yemot must call this endpoint with &token=<YEMOT_WEBHOOK_TOKEN>.
-  // Requests without a valid token are rejected outright.
+  // Prefer the x-yemot-token header. Query-string fallback is kept only for
+  // Yemot deployments that cannot send custom headers. Never log either token.
   const expectedToken = Deno.env.get("YEMOT_WEBHOOK_TOKEN");
   try {
     const authUrl = new URL(req.url);
     const providedToken =
-      authUrl.searchParams.get("token") ??
       req.headers.get("x-yemot-token") ??
+      authUrl.searchParams.get("token") ??
       "";
-    if (!expectedToken || providedToken !== expectedToken) {
+
+    if (!expectedToken || !constantTimeEqual(providedToken, expectedToken)) {
       console.error(`[${reqId}] unauthorized webhook call`);
       return textResponse(UNAUTHORIZED, 401);
     }
@@ -135,41 +150,33 @@ Deno.serve(async (req) => {
 
     const userId = phoneToUserId(apiPhone);
 
-    // ---- Locate active room for this user (never throws) ----
-    let room: any = null;
-    try {
-      const { data: players, error: playersErr } = await supabase
-        .from("room_players")
-        .select("room_id, joined_at, score")
-        .eq("user_id", userId)
-        .order("joined_at", { ascending: false })
-        .limit(5);
-
-      if (playersErr) console.error(`[${reqId}] room_players lookup failed:`, playersErr);
-
-      const playerRows = Array.isArray(players) ? players : [];
-      const roomIds = playerRows.map((p) => p?.room_id).filter(Boolean);
-
-      if (roomIds.length > 0) {
-        const { data: rooms, error: roomsErr } = await supabase
-          .from("game_rooms")
-          .select("id, status, current_question_index, current_phase, phase_started_at, phase_duration_seconds, settings")
-          .in("id", roomIds)
-          .in("status", ["waiting", "playing", "paused"]);
-
-        if (roomsErr) console.error(`[${reqId}] game_rooms lookup failed:`, roomsErr);
-
-        const roomRows = Array.isArray(rooms) ? rooms : [];
-        for (const p of playerRows) {
-          const m = roomRows.find((r) => r?.id === p?.room_id);
-          if (m?.id) { room = { ...m, _player_score: p?.score ?? 0 }; break; }
-        }
-      }
-    } catch (lookupErr) {
-      console.error(`[${reqId}] active-room lookup threw, falling back to login:`, lookupErr);
-      room = null;
+    if (!/^\d{9,15}$/.test(apiPhone.replace(/\D/g, ""))) {
+      console.warn(`[${reqId}] invalid phone format`);
+      return textResponse(GAME_ERROR);
     }
 
+    const digitsPhone = apiPhone.replace(/\D/g, "");
+    const userId = phoneToUserId(digitsPhone);
+
+    // One DB round-trip for active-room polling.
+    const { data: pollData, error: pollError } = await supabase.rpc("phone_poll_state", {
+      _user_id: userId,
+    });
+    const poll = Array.isArray(pollData) ? pollData[0] : pollData;
+    if (pollError) console.error(`[${reqId}] phone poll failed`);
+
+    const room = poll?.room_id ? {
+      id: poll.room_id,
+      status: poll.status,
+      current_question_index: poll.current_question_index ?? -1,
+      current_phase: poll.current_phase ?? "",
+      phase_started_at: poll.phase_started_at,
+      phase_ends_at: poll.phase_ends_at,
+      phase_duration_seconds: poll.phase_duration_seconds ?? 0,
+      _player_score: poll.player_score ?? 0,
+      _pending_param: poll.pending_param ?? null,
+      _answered_current: Boolean(poll.answered_current),
+    } : null;
     // ===== GAME FLOW =====
     if (room?.id) {
       if (room?.status === "finished") return textResponse(GAME_FINISHED);
@@ -184,8 +191,7 @@ Deno.serve(async (req) => {
       const issueNextParam = async (): Promise<string> =>
         rememberPendingParam(supabase, reqId, roomId, userId, currentIdx);
 
-      // ---- Reconnection: every call marks the caller as connected again ----
-      // (score stays in room_players; nothing is reset on reconnect)
+      // Reconnection only updates presence; score remains server-owned.
       await supabase
         .from("room_players")
         .update({ is_connected: true, last_seen: new Date().toISOString() })
@@ -222,7 +228,7 @@ Deno.serve(async (req) => {
         .eq("user_id", userId)
         .maybeSingle();
 
-      const expectedParam: string | null = callState?.pending_param ?? null;
+      const expectedParam: string | null = callState?.pending_param ?? room._pending_param ?? null;
 
       // Yemot may submit a keypress from the immediately preceding `read`
       // after a timeout/re-poll has already replaced pending_param in the DB.
@@ -253,7 +259,7 @@ Deno.serve(async (req) => {
 
 
       if (!answerValue || !/^[1-4]$/.test(answerValue)) {
-        console.log(`[${reqId}] no valid answer param, expected=${expectedParam} qIdx=${currentIdx}`);
+        console.log(`[${reqId}] no valid answer param qIdx=${currentIdx}`);
         return textResponse(gamePlayingResponse(await issueNextParam()));
       }
 
@@ -275,7 +281,7 @@ Deno.serve(async (req) => {
       // lag by more than one question, which previously dropped the press
       // entirely from question 3 onwards.
       if (paramIdx < 0 || paramIdx > curIdx) {
-        console.log(`[${reqId}] press ignored, phase=${phaseNow} paramIdx=${paramIdx} curIdx=${currentIdx}`);
+        console.log(`[${reqId}] press ignored phase=${phaseNow} paramIdx=${paramIdx} curIdx=${currentIdx}`);
         return textResponse(gamePlayingResponse(await issueNextParam()));
       }
 
@@ -334,7 +340,7 @@ Deno.serve(async (req) => {
       const isCurrentTarget = targetIdx === curIdx;
 
       console.log(
-        `[${reqId}] answer start user=${userId} room=${roomId} qIdx=${targetIdx} late=${!isCurrentTarget} param=${answerParam} sel=${selectedIndex} phase=${phaseNow}`,
+        `[${reqId}] answer accepted qIdx=${targetIdx} late=${!isCurrentTarget} sel=${selectedIndex} phase=${phaseNow}`,
       );
 
       const { data: recorded, error: recordErr } = await supabase.rpc("record_game_answer", {
@@ -352,7 +358,7 @@ Deno.serve(async (req) => {
 
       const row = Array.isArray(recorded) ? recorded[0] : recorded;
       console.log(
-        `[${reqId}] recorded qIdx=${targetIdx} score=${Number(row?.score ?? 0)} correct=${Boolean(row?.is_correct)} timeMs=${Number(row?.answer_time_ms ?? 0)}`,
+        `[${reqId}] recorded qIdx=${targetIdx} score=${Number(row?.score ?? 0)} correct=${Boolean(row?.is_correct)}`,
       );
 
       return textResponse(answerReceivedResponse(await issueNextParam()));
@@ -360,15 +366,23 @@ Deno.serve(async (req) => {
 
     // ===== LOGIN FLOW =====
     if (!val) return textResponse(LOGIN_ASK_CODE);
-    if (!/^\d{5}$/.test(val)) return textResponse(LOGIN_INVALID);
+    if (!/^\d{5,6}$/.test(val)) {
+      await supabase.rpc("allow_phone_login_attempt", { _phone: digitsPhone });
+      return textResponse(LOGIN_INVALID);
+    }
 
     try {
       const { data: targetRoom, error: roomErr } = await supabase
         .from("game_rooms")
         .select("id, status")
         .eq("room_code", val)
+        .in("status", ["waiting", "playing", "paused"])
         .maybeSingle();
-      if (roomErr || !targetRoom?.id) return textResponse(LOGIN_INVALID);
+      if (roomErr || !targetRoom?.id) {
+        const { data: allowed } = await supabase.rpc("allow_phone_login_attempt", { _phone: digitsPhone });
+        if (allowed === false) return textResponse(UNAUTHORIZED, 429);
+        return textResponse(LOGIN_INVALID);
+      }
 
       const { data: existing } = await supabase
         .from("room_players")
@@ -385,7 +399,7 @@ Deno.serve(async (req) => {
           score: 0,
         });
         if (insErr) {
-          console.error(`[${reqId}] insert player failed:`, insErr);
+          console.error(`[${reqId}] insert player failed`);
           return textResponse(LOGIN_INVALID);
         }
       } else {
