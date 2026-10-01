@@ -91,11 +91,6 @@ function phoneToUserId(phone: string): string {
   return `00000000-0000-0000-0000-${digits}`;
 }
 
-function maskPhone(phone: string): string {
-  const digits = phone.replace(/\D/g, "");
-  return digits.length > 4 ? "••••" + digits.slice(-4) : "••••";
-}
-
 function textResponse(body: string, status = 200): Response {
   return new Response(body, {
     status,
@@ -314,7 +309,7 @@ Deno.serve(async (req) => {
 
       const isCurrentTarget = targetIdx === curIdx;
 
-      console.log(`[${reqId}] answer start user=${userId} room=${roomId} qIdx=${targetIdx} late=${!isCurrentTarget} param=${answerParam} sel=${selectedIndex} phase=${phaseNow}`);
+      console.log(`[${reqId}] answer accepted qIdx=${targetIdx} late=${!isCurrentTarget} sel=${selectedIndex} phase=${phaseNow}`);
 
       const isCurrentTarget = targetIdx === curIdx;
 
