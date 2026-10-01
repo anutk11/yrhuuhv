@@ -27,7 +27,8 @@ const JoinGame = () => {
         transition={{ duration: 0.5 }}
       >
         <button
-          aria-label="חזרה"\n          onClick={() => navigate("/")}
+          aria-label="חזרה"
+          onClick={() => navigate("/")}
           className="text-muted-foreground hover:text-foreground mb-6 flex items-center gap-2 text-sm"
         >
           <ArrowRight className="w-4 h-4" />
@@ -49,7 +50,8 @@ const JoinGame = () => {
               className="text-center text-2xl font-display tracking-[0.3em] h-14 bg-secondary border-border"
               maxLength={6}
               inputMode="numeric"
-              pattern="[0-9]*"\n              autoComplete="one-time-code"
+              pattern="[0-9]*"
+              autoComplete="one-time-code"
               onKeyDown={(e) => e.key === "Enter" && handleJoin()}
             />
           </div>
