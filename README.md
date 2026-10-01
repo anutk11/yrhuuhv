@@ -111,3 +111,14 @@ The administrator can then manage roles from **ניהול מערכת**.
 ### User experience
 
 Authenticated users can create games, invite Google players, use the central bank, manage their private bank, generate questions with AI, and view their own game history. Administrators additionally manage the central bank, user roles, phone roster, and audit log.
+## Production hardening notes
+
+The production database is intentionally not identified in `supabase/config.toml`. Link the repository to the new Supabase project with `supabase link --project-ref <project-ref>`.
+
+The Yemot webhook fails closed unless the `YEMOT_WEBHOOK_TOKEN` Supabase secret is configured. Prefer sending it in the `x-yemot-token` header; the query-string fallback is retained only for Yemot deployments that cannot send custom headers.
+
+Game phase changes are server-driven by `tick_rooms()` and private Realtime Broadcast channels. Clients use a 30-second safety resync rather than polling every few seconds.
+
+The synthetic phone user id still uses the last 12 phone digits for backward-compatible roster mapping. This collision risk is documented intentionally and is not changed until a roster-compatible migration is available.
+
+For scale testing, use `scripts/loadtest/quiz.js` with k6. Supply test access tokens through environment variables only; never commit tokens.
