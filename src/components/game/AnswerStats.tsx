@@ -41,22 +41,21 @@ const AnswerStats = ({ questionId, roomId, totalPlayers, phase }: AnswerStatsPro
     if (!questionId || !roomId) return;
     void fetchStats();
 
-    const channel = supabase.channel("answer-events-" + roomId + "-" + questionId)
-      .on("postgres_changes", {
-        event: "INSERT",
-        schema: "public",
-        table: "game_answer_events",
-        filter: "room_id=eq." + roomId,
-      }, () => void fetchStats())
-      .subscribe();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let disposed = false;
+    const setup = async () => {
+      await supabase.realtime.setAuth();
+      if (disposed) return;
+      channel = supabase.channel("room:" + roomId, { config: { private: true } })
+        .on("broadcast", { event: "answer_count" }, () => void fetchStats())
+        .subscribe();
+    };
+    void setup();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [questionId, roomId, fetchStats]);
-
-  useEffect(() => {
-    if (!questionId || !roomId) return;
-    const id = window.setInterval(() => void fetchStats(), 10000);
-    return () => window.clearInterval(id);
+    return () => {
+      disposed = true;
+      if (channel) supabase.removeChannel(channel);
+    };
   }, [questionId, roomId, fetchStats]);
 
   useEffect(() => {
@@ -78,7 +77,7 @@ const AnswerStats = ({ questionId, roomId, totalPlayers, phase }: AnswerStatsPro
         animate={pulse ? { scale: [1, 1.15, 1] } : {}}
         transition={{ duration: 0.4, ease: "easeOut" }}
       >
-        <Users className="w-5 h-5" />
+        <Users aria-hidden="true" className="w-5 h-5" />
         <span className="font-display text-base">{answered}/{totalPlayers} ענו</span>
       </motion.div>
       <div className="w-full h-2.5 bg-secondary rounded-full overflow-hidden">
@@ -94,8 +93,8 @@ const AnswerStats = ({ questionId, roomId, totalPlayers, phase }: AnswerStatsPro
           animate={{ opacity: 1, height: "auto" }}
           className="flex flex-col gap-2 pt-2 border-t border-border mt-1"
         >
-          <div className="flex items-center gap-2 text-answer-green"><Check className="w-5 h-5" /><span className="font-display text-base">{correct} הצליחו</span></div>
-          <div className="flex items-center gap-2 text-destructive"><X className="w-5 h-5" /><span className="font-display text-base">{wrong} טעו</span></div>
+          <div className="flex items-center gap-2 text-answer-green"><Check aria-hidden="true" className="w-5 h-5" /><span className="font-display text-base">{correct} הצליחו</span></div>
+          <div className="flex items-center gap-2 text-destructive"><X aria-hidden="true" className="w-5 h-5" /><span className="font-display text-base">{wrong} טעו</span></div>
         </motion.div>
       )}
     </div>
