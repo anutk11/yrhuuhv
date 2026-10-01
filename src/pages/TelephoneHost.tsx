@@ -8,14 +8,7 @@ import { useGameAudio } from "@/hooks/useGameAudio";
 import QRInvite from "@/components/game/QRInvite";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { getNextPhaseTransition, getPhaseDuration, getReadingTime, type GamePhase } from "@/lib/gamePhases";
-import {
-  fetchRosterMap,
-  isPhoneUserId,
-  phoneFromUserId as rosterPhoneFromUserId,
-  rosterNameForUser,
-  type RosterMap,
-} from "@/lib/phoneRoster";
+import { getPhaseDuration, type GamePhase } from "@/lib/gamePhases";
 
 const PHONE_NUMBER = "0772613163";
 
@@ -110,30 +103,8 @@ const TelephoneHost = () => {
   const [voteQuestionId, setVoteQuestionId] = useState<string | null>(null);
   const [roomCode, setRoomCode] = useState("");
   const [lastResultSoundKey, setLastResultSoundKey] = useState<string | null>(null);
-  const [rosterMap, setRosterMap] = useState<RosterMap>(() => new Map());
-  const phaseTransitionKeyRef = useRef<string | null>(null);
-  const isSyncingRef = useRef(false);
-  // Keep a local phase clock as a fallback when the projection device and the
-  // database clock differ. Without this, a valid phase can render at 0 while
-  // the clock-skew guard is still intentionally keeping it on screen.
-  const phaseLocalStartRef = useRef<{ key: string; ts: number } | null>(null);
-
-  // Fetch roster names for any phone players in the room
-  useEffect(() => {
-    const phones = players
-      .filter((p) => isPhoneUserId(p.user_id))
-      .map((p) => rosterPhoneFromUserId(p.user_id) || "")
-      .filter(Boolean);
-    if (phones.length === 0) {
-      setRosterMap(new Map());
-      return;
-    }
-    let cancelled = false;
-    void fetchRosterMap(phones).then((m) => {
-      if (!cancelled) setRosterMap(m);
-    });
-    return () => { cancelled = true; };
-  }, [players]);
+  const [serverOffsetMs, setServerOffsetMs] = useState(0);
+  const [leaderboardRows, setLeaderboardRows] = useState<Array<{ user_id: string; display_name: string; score: number; rank: number }>>([]);
 
   // Fetch room code once
   useEffect(() => {
@@ -144,21 +115,8 @@ const TelephoneHost = () => {
 
   const phase = (room?.current_phase || (currentQuestionIndex >= 0 ? "reading" : "idle")) as GamePhase;
   const configuredPhaseTime = getPhaseDuration(currentQuestion, phase, room?.settings);
-  const storedPhaseTime = room?.phase_duration_seconds ?? 0;
-  // During the answering phase the authoritative duration is always the
-  // per-question time limit — a stale/incorrect stored value must not shorten it.
-  const totalTime =
-    phase === "answering"
-      ? configuredPhaseTime
-      : storedPhaseTime > 0
-        ? storedPhaseTime
-        : configuredPhaseTime;
+  const totalTime = room?.phase_duration_seconds || configuredPhaseTime;
   const hasVideo = !!(currentQuestion?.mediaType === "video" && currentQuestion?.mediaUrl);
-  const phaseKey = `${room?.current_question_index ?? -1}:${room?.current_phase ?? "idle"}:${room?.phase_started_at ?? ""}:${room?.status ?? ""}`;
-
-  if (phaseLocalStartRef.current?.key !== phaseKey) {
-    phaseLocalStartRef.current = { key: phaseKey, ts: Date.now() };
-  }
 
   const { playAnswerSound, fadeOutSfx } = useGameAudio({
     settings: {
@@ -176,109 +134,53 @@ const TelephoneHost = () => {
   });
 
   const timeLeft = useMemo(() => {
-    if (!room) return 0;
-    if (phase === "idle") return 0;
+    if (!room || phase === "idle") return 0;
+    if (room.phase_ends_at) {
+      return Math.max(0, Math.ceil((new Date(room.phase_ends_at).getTime() - (now + serverOffsetMs)) / 1000));
+    }
     if (!room.phase_started_at) return totalTime;
-
-    const localStart = phaseLocalStartRef.current;
-
-    // The answering countdown must begin at the question's full configured
-    // duration when this projection first receives the new phase. Using the
-    // database timestamp here subtracts realtime/network delivery latency
-    // (which is why a 15-second question could first appear at 8).
-    if (phase === "answering" && localStart?.key === phaseKey) {
-      return Math.max(0, Math.ceil((localStart.ts + totalTime * 1000 - now) / 1000));
-    }
-
-    const endAt = new Date(room.phase_started_at).getTime() + totalTime * 1000;
-    const serverTimeLeft = Math.max(0, Math.ceil((endAt - now) / 1000));
-
-    // Decide once per phase whether the server clock is usable. If the phase
-    // already looked expired the moment we first saw it (clock skew), count down
-    // from the local start instead — but never switch back to local afterwards,
-    // otherwise the timer restarts and appears to add another full duration.
-    const useLocal =
-      !!localStart &&
-      localStart.key === phaseKey &&
-      Math.ceil((endAt - localStart.ts) / 1000) <= 0;
-
-    if (!useLocal) return serverTimeLeft;
-    return Math.max(0, Math.ceil((localStart.ts + totalTime * 1000 - now) / 1000));
-  }, [room, phase, phaseKey, totalTime, now]);
+    return Math.max(0, Math.ceil((
+      new Date(room.phase_started_at).getTime() + totalTime * 1000 - (now + serverOffsetMs)
+    ) / 1000));
+  }, [room, phase, totalTime, now, serverOffsetMs]);
 
 
-  // Tick
+  // Client-side timer only renders server-provided phase_ends_at; it never advances the game.
   useEffect(() => {
+    let alive = true;
+    const syncClock = async () => {
+      const { data } = await supabase.rpc("server_now" as any);
+      const serverNow = Array.isArray(data) ? data[0] : data;
+      if (alive && serverNow) setServerOffsetMs(new Date(serverNow as string).getTime() - Date.now());
+    };
+    void syncClock();
+
     const id = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(id);
+    const clock = window.setInterval(() => void syncClock(), 60000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+      window.clearInterval(clock);
+    };
   }, []);
-
-  // Track when each phase was first observed locally — used as a clock-skew-safe
-  // minimum-display guard so phases (especially leaderboard) aren't skipped instantly.
-  useEffect(() => {
-    phaseTransitionKeyRef.current = null;
-  }, [phaseKey]);
-
-  // Drive phase transitions (host)
-  const syncPhase = useCallback(async (forcedPhase?: GamePhase, forcedQuestionIndex?: number) => {
-    if (!roomId || !room || isSyncingRef.current) return false;
-    // Only the room host may drive phase transitions (the RPC rejects others).
-    if (user?.id !== room.host_id) return false;
-    const expectedPhase = forcedPhase ?? phase;
-    const expectedQuestionIndex = forcedQuestionIndex ?? currentQuestionIndex;
-    const transition = getNextPhaseTransition({
-      currentPhase: expectedPhase,
-      currentQuestionIndex: expectedQuestionIndex,
-      questions,
-      settings: room.settings,
-    });
-    if (!transition) return false;
-    isSyncingRef.current = true;
-    try {
-      await supabase.rpc("sync_room_phase", {
-        _room_id: roomId,
-        _expected_question_index: expectedQuestionIndex,
-        _expected_phase: expectedPhase,
-        _next_phase: transition.nextPhase,
-        _phase_duration_seconds: transition.duration,
-        _next_question_index: transition.nextQuestionIndex ?? null,
-        _next_status: transition.nextStatus ?? null,
-      });
-      await fetchRoom();
-      return true;
-    } finally {
-      isSyncingRef.current = false;
-    }
-  }, [roomId, room, phase, currentQuestionIndex, questions, fetchRoom, user?.id]);
-
-  useEffect(() => {
-    if (!room || !currentQuestion || currentQuestionIndex < 0 || room.status !== "playing") return;
-    if (isPaused) return;
-    if (phase === "reading" && currentQuestion.mediaType === "video" && currentQuestion.mediaUrl) return;
-    if (timeLeft > 0) return;
-
-    // timeLeft already falls back to the local phase start when the server
-    // clock is skewed, so no extra minimum-display guard is needed here
-    // (it used to double the phase duration).
-
-
-    if (phaseTransitionKeyRef.current === phaseKey) return;
-    phaseTransitionKeyRef.current = phaseKey;
-    void syncPhase();
-  }, [room, currentQuestion, currentQuestionIndex, phase, timeLeft, totalTime, phaseKey, syncPhase, isPaused]);
 
   // Fetch vote counts during result phase
   const fetchVotes = useCallback(async () => {
     if (!currentQuestion || !roomId) return;
-    const { data, error } = await supabase.rpc("get_question_answer_stats", {
+    const { data, error } = await supabase.rpc("get_answer_counts" as any, {
       _room_id: roomId,
       _question_id: currentQuestion.id,
     });
-    if (error || !data) return;
-    const row = Array.isArray(data) ? data[0] : data;
-    const counts = Array.isArray(row?.vote_counts) ? row.vote_counts.map((n: unknown) => Number(n) || 0) : [];
+    if (error) return;
+    const counts = Array(currentQuestion.options.length).fill(0) as number[];
+    for (const row of Array.isArray(data) ? data : []) {
+      const i = Number((row as any).selected_index);
+      if (Number.isInteger(i) && i >= 0 && i < counts.length) {
+        counts[i] = Number((row as any).count ?? 0);
+      }
+    }
     setVoteQuestionId(currentQuestion.id);
-    setVoteCounts(currentQuestion.options.map((_, i) => counts[i] ?? 0));
+    setVoteCounts(counts);
   }, [currentQuestion, roomId]);
 
   useEffect(() => {
@@ -292,19 +194,17 @@ const TelephoneHost = () => {
     }
   }, [phase, fetchVotes]);
 
-  // Realtime answers count for live "answered so far" + correct/wrong
+  // Answer counts update through a private broadcast carrying no answer/PII payload.
   const [answeredCount, setAnsweredCount] = useState(0);
   const [correctCount, setCorrectCount] = useState(0);
   const [wrongCount, setWrongCount] = useState(0);
   const [answerStatsQuestionId, setAnswerStatsQuestionId] = useState<string | null>(null);
+
   useEffect(() => {
     if (!currentQuestion || !roomId) return;
     const questionId = currentQuestion.id;
     let cancelled = false;
-    setAnswerStatsQuestionId(null);
-    setAnsweredCount(0);
-    setCorrectCount(0);
-    setWrongCount(0);
+
     const refresh = async () => {
       const { data, error } = await supabase.rpc("get_question_answer_stats", {
         _room_id: roomId,
@@ -317,26 +217,28 @@ const TelephoneHost = () => {
       setCorrectCount(Number(row?.correct ?? 0));
       setWrongCount(Number(row?.wrong ?? 0));
     };
-    refresh();
-    const ch = supabase
-      .channel(`tel-answers-${roomId}-${questionId}`)
-      .on("postgres_changes", {
-        event: "*",
-        schema: "public",
-        table: "game_answer_events",
-        filter: "room_id=eq." + roomId,
-      }, () => refresh())
-      .subscribe();
-    // Polling fallback — realtime can miss inserts from the phone webhook
-    const poll = window.setInterval(refresh, 5000);
+
+    setAnswerStatsQuestionId(null);
+    setAnsweredCount(0);
+    setCorrectCount(0);
+    setWrongCount(0);
+    void refresh();
+
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    const setup = async () => {
+      await supabase.realtime.setAuth();
+      if (cancelled) return;
+      channel = supabase.channel("room:" + roomId, { config: { private: true } })
+        .on("broadcast", { event: "answer_count" }, () => void refresh())
+        .subscribe();
+    };
+    void setup();
+
     return () => {
       cancelled = true;
-      supabase.removeChannel(ch);
-      window.clearInterval(poll);
+      if (channel) supabase.removeChannel(channel);
     };
-  }, [currentQuestion?.id, roomId]);
-
-  const activeAnsweredCount = answerStatsQuestionId === currentQuestion?.id ? answeredCount : 0;
+  }, [currentQuestion?.id, roomId]);  const activeAnsweredCount = answerStatsQuestionId === currentQuestion?.id ? answeredCount : 0;
   const activeCorrectCount = answerStatsQuestionId === currentQuestion?.id ? correctCount : 0;
   const activeWrongCount = answerStatsQuestionId === currentQuestion?.id ? wrongCount : 0;
 
@@ -359,55 +261,33 @@ const TelephoneHost = () => {
     setLastResultSoundKey(resultKey);
   }, [phase, currentQuestion, room?.phase_started_at, activeCorrectCount, playAnswerSound, fadeOutSfx, lastResultSoundKey]);
 
-  // Manually start the game
+  // Game phases and pause/resume are server-authoritative.
   const startGame = async () => {
     if (!roomId || questions.length === 0) return;
-    await syncPhase("idle", -1);
-  };
-
-  // Pause / resume (direct update; host bypass)
-  const togglePause = async () => {
-    if (!room || !roomId) return;
-    const remainingSeconds = room.phase_started_at
-      ? Math.max(0, Math.ceil((new Date(room.phase_started_at).getTime() + totalTime * 1000 - Date.now()) / 1000))
-      : Math.max(room.phase_duration_seconds ?? totalTime, 0);
-
-    if (isPaused) {
-      await supabase.from("game_rooms").update({
-        status: "playing",
-        phase_started_at: new Date().toISOString(),
-        phase_duration_seconds: Math.max(room.phase_duration_seconds || remainingSeconds || totalTime, 1),
-      }).eq("id", roomId);
-    } else {
-      await supabase.from("game_rooms").update({
-        status: "paused",
-        phase_started_at: null,
-        phase_duration_seconds: Math.max(remainingSeconds, 0),
-      }).eq("id", roomId);
-    }
-    phaseTransitionKeyRef.current = null;
+    const { error } = await supabase.rpc("host_start_game" as any, { _room_id: roomId });
+    if (error) return;
     await fetchRoom();
   };
 
-  // Previous question (rewind: deletes answers + subtracts scores)
+  const togglePause = async () => {
+    if (!room) return;
+    await setGameStatus(isPaused ? "playing" : "paused");
+  };
+
   const goPrev = async () => {
     const target = currentQuestionIndex - 1;
     if (target < 0 || !roomId) return;
     await rewindQuestion(target);
-    phaseTransitionKeyRef.current = null;
     await fetchRoom();
   };
 
-  // Next question (direct update; host bypass)
   const goNext = async () => {
-    if (!roomId) return;
-    const target = currentQuestionIndex + 1;
+    if (!roomId || currentQuestionIndex >= questions.length - 1) return;
     await supabase.rpc("host_set_next_question", {
       _room_id: roomId,
       _expected_index: currentQuestionIndex,
-      _to_index: target,
+      _to_index: currentQuestionIndex + 1,
     });
-    phaseTransitionKeyRef.current = null;
     await fetchRoom();
   };
 
@@ -418,6 +298,20 @@ const TelephoneHost = () => {
       </div>
     );
   }
+
+  useEffect(() => {
+    if (!roomId || (!isLeaderboardPhase && !isFinished)) return;
+    let alive = true;
+    void fetchLeaderboard(10).then((rows) => {
+      if (alive) setLeaderboardRows(rows.map((r) => ({
+        user_id: r.user_id,
+        display_name: r.display_name,
+        score: r.score,
+        rank: r.rank,
+      })));
+    });
+    return () => { alive = false; };
+  }, [roomId, isLeaderboardPhase, isFinished, fetchLeaderboard]);
 
   const connectedPlayers = players.filter((p) => p.is_connected);
   const isLobby = phase === "idle" || currentQuestionIndex < 0;
@@ -430,14 +324,7 @@ const TelephoneHost = () => {
   const totalVotes = activeVoteCounts.reduce((a, b) => a + b, 0);
   const maxVotes = Math.max(1, ...activeVoteCounts);
 
-  const displayNameFor = (p: any) => {
-    const rosterName = rosterNameForUser(p.user_id, rosterMap);
-    if (rosterName) return rosterName;
-    if (p.nickname) return p.nickname;
-    const phone = rosterPhoneFromUserId(p.user_id);
-    if (phone) return formatPhone(phone);
-    return `Player ${String(p.user_id).slice(-4)}`;
-  };
+  const displayNameFor = (p: any) => p.nickname || p.display_name || "שחקן";
 
   return (
     <div className={`h-screen bg-gradient-to-br from-[#05060f] via-[#0a0d24] to-[#100926] text-white overflow-hidden relative ${cursorHidden ? "cursor-none [&_*]:cursor-none" : ""}`} dir="rtl">
@@ -589,7 +476,7 @@ const TelephoneHost = () => {
               🏅 טבלת דירוג
             </motion.h2>
             <div className="w-full max-w-3xl space-y-2 min-h-0 overflow-y-auto">
-              {sortedPlayers.slice(0, 10).map((p, i) => (
+              {leaderboardRows.map((p, i) => (
                 <motion.div
                   key={p.user_id}
                   initial={{ x: -30, opacity: 0 }}
@@ -607,10 +494,10 @@ const TelephoneHost = () => {
                 >
                   <div className="flex items-center gap-4">
                     <span className="font-mono text-2xl font-black text-white/70 w-8 text-center">
-                      {i + 1}
+                      {p.rank}
                     </span>
                     <span className="font-display text-xl md:text-2xl font-bold text-white">
-                      {displayNameFor(p)}
+                      {p.display_name}
                     </span>
                   </div>
                   <span className="font-mono text-2xl md:text-3xl font-black text-cyan-300">
