@@ -56,8 +56,21 @@ Deno.serve(async (req) => {
   const { data: userData, error: userErr } = await userClient.auth.getUser();
   if (userErr || !userData.user) return json({ error: "Unauthorized" }, 401);
 
-  const { data: isAdmin } = await userClient.rpc("has_role", { _user_id: userData.user.id, _role: "admin" });
-  if (!isAdmin) return json({ error: "Admins only" }, 403);
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!serviceKey) return json({ error: "Server configuration error" }, 500);
+  const serviceClient = createClient(url, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  // Server-side quota: admins and users who have hosted a game may generate
+  // at most 10 requests/hour and 50/day. The quota function also prevents
+  // unauthorized users from consuming AI capacity.
+  const { data: quotaAllowed, error: quotaError } = await serviceClient.rpc(
+    "consume_ai_generation_quota",
+    { _user_id: userData.user.id },
+  );
+  if (quotaError) return json({ error: "AI quota service unavailable" }, 503);
+  if (!quotaAllowed) return json({ error: "AI generation limit reached or user is not authorized" }, 429);
 
   const parsed = BodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return json({ error: "Invalid input", details: parsed.error.flatten().fieldErrors }, 400);
