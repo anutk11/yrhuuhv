@@ -27,7 +27,7 @@ const JoinGame = () => {
         transition={{ duration: 0.5 }}
       >
         <button
-          onClick={() => navigate("/")}
+          aria-label="חזרה"\n          onClick={() => navigate("/")}
           className="text-muted-foreground hover:text-foreground mb-6 flex items-center gap-2 text-sm"
         >
           <ArrowRight className="w-4 h-4" />
@@ -44,10 +44,12 @@ const JoinGame = () => {
             <label className="text-sm text-muted-foreground mb-1 block">קוד חדר</label>
             <Input
               value={roomCode}
-              onChange={(e) => setRoomCode(e.target.value.replace(/\\D/g, "").slice(0, 6))}
+              onChange={(e) => setRoomCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
               placeholder="123456"
               className="text-center text-2xl font-display tracking-[0.3em] h-14 bg-secondary border-border"
-              maxLength={6}\n              inputMode="numeric"\n              pattern="[0-9]*"\n              autoComplete="one-time-code"
+              maxLength={6}
+              inputMode="numeric"
+              pattern="[0-9]*"\n              autoComplete="one-time-code"
               onKeyDown={(e) => e.key === "Enter" && handleJoin()}
             />
           </div>
@@ -55,7 +57,7 @@ const JoinGame = () => {
             variant="neon"
             className="w-full h-12 text-lg"
             onClick={handleJoin}
-            disabled={!/^\\d{5,6}$/.test(roomCode)}
+            disabled={!/^\d{5,6}$/.test(roomCode)}
           >
             הצטרף!
           </Button>
