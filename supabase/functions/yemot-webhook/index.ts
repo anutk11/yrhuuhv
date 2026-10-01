@@ -309,10 +309,6 @@ Deno.serve(async (req) => {
 
       const isCurrentTarget = targetIdx === curIdx;
 
-      console.log(`[${reqId}] answer accepted qIdx=${targetIdx} late=${!isCurrentTarget} sel=${selectedIndex} phase=${phaseNow}`);
-
-      const isCurrentTarget = targetIdx === curIdx;
-
       console.log(
         `[${reqId}] answer accepted qIdx=${targetIdx} late=${!isCurrentTarget} sel=${selectedIndex} phase=${phaseNow}`,
       );
