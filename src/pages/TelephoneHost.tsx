@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Phone, Users, LogOut, Play, Pause, ChevronRight, ChevronLeft, Volume2, VolumeX, Maximize, Minimize } from "lucide-react";
@@ -52,6 +52,7 @@ const TelephoneHost = () => {
     fetchRoom,
     rewindQuestion,
     setGameStatus,
+    fetchLeaderboard,
   } = useGameSync(roomId);
 
   const isPaused = room?.status === "paused";
@@ -299,6 +300,11 @@ const TelephoneHost = () => {
     );
   }
 
+  const connectedPlayers = players.filter((p) => p.is_connected);
+  const isLobby = phase === "idle" || currentQuestionIndex < 0;
+  const isFinished = room.status === "finished" || phase === "stats";
+  const isLeaderboardPhase = phase === "leaderboard";
+
   useEffect(() => {
     if (!roomId || (!isLeaderboardPhase && !isFinished)) return;
     let alive = true;
@@ -312,11 +318,6 @@ const TelephoneHost = () => {
     });
     return () => { alive = false; };
   }, [roomId, isLeaderboardPhase, isFinished, fetchLeaderboard]);
-
-  const connectedPlayers = players.filter((p) => p.is_connected);
-  const isLobby = phase === "idle" || currentQuestionIndex < 0;
-  const isFinished = room.status === "finished" || phase === "stats";
-  const isLeaderboardPhase = phase === "leaderboard";
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
   const activeVoteCounts = voteQuestionId === currentQuestion?.id
     ? voteCounts
@@ -395,8 +396,8 @@ const TelephoneHost = () => {
 
             {/* Podium top 3 */}
             <div className="flex items-end justify-center gap-4 md:gap-8 mb-4 w-full max-w-4xl shrink-0">
-              {[1, 0, 2].map((rankIdx) => {
-                const p = sortedPlayers[rankIdx];
+              {[2, 1, 3].map((rankIdx, place) => {
+                const p = leaderboardRows.find((row) => row.rank === rankIdx);
                 if (!p) return <div key={rankIdx} className="w-1/3" />;
                 const heights = ["h-[14vh]", "h-[20vh]", "h-[10vh]"];
                 const colors = [
@@ -405,8 +406,7 @@ const TelephoneHost = () => {
                   "from-orange-400 to-amber-700",
                 ];
                 const medals = ["🥈", "🥇", "🥉"];
-                const positions = [1, 0, 2];
-                const place = positions.indexOf(rankIdx);
+
                 return (
                   <motion.div
                     key={p.user_id}
@@ -417,14 +417,14 @@ const TelephoneHost = () => {
                   >
                     <div className="text-5xl md:text-6xl mb-2">{medals[place]}</div>
                     <div className="text-lg md:text-2xl font-display font-bold text-white mb-1 text-center">
-                      {displayNameFor(p)}
+                      {p.display_name}
                     </div>
                     <div className="font-mono text-3xl md:text-4xl font-black text-cyan-300 mb-2">
                       {p.score}
                     </div>
                     <div className={`w-full ${heights[place]} rounded-t-2xl bg-gradient-to-t ${colors[place]} shadow-2xl flex items-start justify-center pt-3`}>
                       <span className="text-white/90 font-display font-black text-3xl">
-                        {rankIdx + 1}
+                        {rankIdx}
                       </span>
                     </div>
                   </motion.div>
@@ -433,18 +433,16 @@ const TelephoneHost = () => {
             </div>
 
             {/* Rest of the leaderboard */}
-            {sortedPlayers.length > 3 && (
+            {leaderboardRows.length > 3 && (
               <div className="w-full max-w-2xl space-y-2 min-h-0 overflow-y-auto">
-                {sortedPlayers.slice(3).map((p, i) => (
+                {leaderboardRows.filter((p) => p.rank > 3).map((p) => (
                   <div
                     key={p.user_id}
                     className="flex items-center justify-between bg-white/5 backdrop-blur-md border border-white/10 rounded-xl px-5 py-3"
                   >
                     <div className="flex items-center gap-4">
-                      <span className="font-mono text-white/60 w-6 text-center">{i + 4}</span>
-                      <span className="font-display text-lg text-white">
-                        {displayNameFor(p)}
-                      </span>
+                      <span className="font-mono text-white/60 w-6 text-center">{p.rank}</span>
+                      <span className="font-display text-lg text-white">{p.display_name}</span>
                     </div>
                     <span className="font-mono text-xl font-bold text-cyan-300">{p.score}</span>
                   </div>
