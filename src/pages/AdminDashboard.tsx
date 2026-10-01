@@ -728,37 +728,24 @@ const AdminDashboard = () => {
       return;
     }
     
-    if (mode === "player" && user) {
-      // Do not update score/presence directly from the browser.
-      const { error: joinError } = await supabase.from("room_players").insert({
-        room_id: roomId,
-        user_id: user.id,
-        is_connected: true,
-        score: 0,
+    if (mode === "player" && user && roomCode) {
+      const { error: joinError } = await supabase.rpc("join_room" as any, {
+        _room_code: roomCode,
       });
-
-      if (joinError?.code === "23505") {
-        const { error: presenceError } = await supabase.rpc("touch_room_presence", {
-          _room_id: roomId,
-          _is_connected: true,
-        });
-        if (presenceError) {
-          toast.error("שגיאה בחיבור מחדש");
-          return;
-        }
-      } else if (joinError) {
+      if (joinError) {
         toast.error("שגיאה בהצטרפות כמנחה-שחקן");
         return;
       }
     }
 
-    await supabase.from("game_rooms").update({
-      status: "playing",
-      current_question_index: -1,
-      current_phase: "idle",
-      phase_started_at: null,
-      phase_duration_seconds: 0,
-    }).eq("id", roomId);
+    const { error: startError } = await supabase.rpc("host_start_game" as any, {
+      _room_id: roomId,
+    });
+    if (startError) {
+      toast.error(startError.message || "שגיאה בהתחלת המשחק");
+      return;
+    }
+
     navigate(`/game?room=${roomId}&host=1${mode === "observer" ? "&observe=1" : ""}`);
     setShowStartChoice(false);
   };
@@ -768,13 +755,11 @@ const AdminDashboard = () => {
       toast.error("הוסף שאלות לפני תחילת המשחק");
       return;
     }
-    await supabase.from("game_rooms").update({
-      status: "playing",
-      current_question_index: -1,
-      current_phase: "idle",
-      phase_started_at: null,
-      phase_duration_seconds: 0,
-    }).eq("id", roomId);
+    const { error } = await supabase.rpc("host_start_game" as any, { _room_id: roomId });
+    if (error) {
+      toast.error(error.message || "שגיאה בהתחלת המשחק");
+      return;
+    }
     navigate(`/telephone?room=${roomId}`);
   };
 
