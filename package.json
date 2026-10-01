@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "loadtest:k6": "k6 run scripts/loadtest/quiz.js",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
     "check": "npm run typecheck && npm run lint && npm test && npm run build"
   },
