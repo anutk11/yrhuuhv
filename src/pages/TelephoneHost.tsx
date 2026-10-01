@@ -579,7 +579,7 @@ const TelephoneHost = () => {
                       transition={{ type: "spring", stiffness: 260, damping: 20 }}
                       className="bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-md border border-white/20 rounded-2xl p-4 text-center shadow-lg"
                     >
-                      <div className="text-3xl mb-2">{isPhoneUserId(p.user_id) ? "📞" : "💻"}</div>
+                      <div className="text-3xl mb-2">{p.is_phone ? "📞" : "💻"}</div>
                       <div className="font-mono text-base md:text-lg font-bold text-white tracking-wider">
                         {displayNameFor(p)}
                       </div>
