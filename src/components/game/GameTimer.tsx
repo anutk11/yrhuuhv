@@ -70,6 +70,9 @@ const GameTimer = ({ timeLeft, totalTime, phase }: GameTimerProps) => {
               key={timeLeft}
               initial={{ scale: 1.3 }}
               animate={{ scale: 1 }}
+              role="status"
+              aria-live="polite"
+              aria-label={"נותרו " + timeLeft + " שניות"}
               className={`absolute inset-0 flex items-center justify-center font-display text-xl font-bold ${
                 isUrgent ? "text-destructive" : "text-primary"
               }`}
