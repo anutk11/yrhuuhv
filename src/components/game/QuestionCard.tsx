@@ -133,12 +133,17 @@ const QuestionCard = ({
                     disabled={disabled}
                     onClick={() => onAnswer(i)}
                   >
-                    {option}
+                    <span className="flex items-center justify-center gap-3">
+                      <span aria-hidden="true" className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-current/40 text-sm font-bold">
+                        {["א", "ב", "ג", "ד"][i]}
+                      </span>
+                      <span>{option}</span>
+                    </span>
                     {isResultCorrect && (
-                      <Check className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6" />
+                      <Check aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6" />
                     )}
                     {isResultWrong && (
-                      <X className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6" />
+                      <X aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6" />
                     )}
                   </Button>
                 </motion.div>
