@@ -148,8 +148,6 @@ Deno.serve(async (req) => {
 
     if (!apiPhone) return textResponse(GAME_ERROR);
 
-    const userId = phoneToUserId(apiPhone);
-
     if (!/^\d{9,15}$/.test(apiPhone.replace(/\D/g, ""))) {
       console.warn(`[${reqId}] invalid phone format`);
       return textResponse(GAME_ERROR);
