@@ -374,13 +374,14 @@ const GamePlay = () => {
           {phase === "leaderboard" ? (
             <Leaderboard
               key="leaderboard"
-              players={players
-                .sort((a, b) => b.score - a.score)
-                .map((p) => ({
-                  name: p.nickname || p.display_name,
-                  score: p.score,
-                  fastest: false,
-                }))}
+              players={leaderboardRows.map((p) => ({
+                userId: p.user_id,
+                name: p.display_name,
+                score: p.score,
+                rank: p.rank,
+                fastest: false,
+                isMe: p.is_me,
+              }))}
             />
           ) : phase === "survey-result" ? (
             <SurveyResults
