@@ -193,35 +193,21 @@ const AdminDashboard = () => {
       toast.error("יש להזין שם חדר");
       return;
     }
-    let data: any = null;
-    let lastError: any = null;
+    const { data: created, error } = await supabase.rpc("create_game_room" as any, {
+      _room_name: roomName.trim(),
+      _settings: {
+        correctness_weight: 60,
+        show_leaderboard_every: 2,
+        default_time_limit: 15,
+        result_display_seconds: resultDisplaySeconds,
+        leaderboard_display_seconds: leaderboardDisplaySeconds,
+        allow_late_press: true,
+      },
+    });
 
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const code = generateRoomCode();
-      const { data: inserted, error } = await supabase
-        .from("game_rooms")
-        .insert({
-          room_code: code,
-          host_id: user.id,
-          room_name: roomName.trim(),
-          settings: { correctness_weight: 60, show_leaderboard_every: 2, default_time_limit: 15 },
-        } as any)
-        .select()
-        .single();
-
-      if (!error) {
-        data = inserted;
-        lastError = null;
-        break;
-      }
-
-      lastError = error;
-      // 23505 = unique violation on room_code -> try another code
-      if (error.code !== "23505") break;
-    }
-
-    if (!data) {
-      toast.error("שגיאה ביצירת חדר: " + (lastError?.message ?? "לא נמצא קוד חדר פנוי"));
+    const data: any = Array.isArray(created) ? created[0] : created;
+    if (error || !data?.id) {
+      toast.error("שגיאה ביצירת חדר: " + (error?.message ?? "לא ניתן ליצור חדר"));
       return;
     }
 
