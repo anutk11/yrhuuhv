@@ -96,7 +96,7 @@ with check (
 );
 
 revoke insert on public.game_rooms from anon, authenticated;
-grant insert on public.game_rooms to authenticated; -- RPC uses definer privileges; retained for backward-compatible tooling.
+
 revoke all on public.game_rooms from anon;
 
 create table if not exists public.room_join_rate_limits (
@@ -300,8 +300,8 @@ on public.room_players for select to authenticated
 using (user_id=(select auth.uid()) or public.is_room_member(room_id,(select auth.uid())));
 drop policy if exists "Users can join rooms" on public.room_players;
 drop policy if exists "Users can update own presence" on public.room_players;
-revoke insert,update from anon,authenticated on public.room_players;
-revoke delete from anon;
+revoke insert, update on public.room_players from anon, authenticated;
+revoke delete on public.room_players from anon;
 grant delete on public.room_players to authenticated;
 drop policy if exists "Hosts can delete players" on public.room_players;
 create policy "Hosts can delete players"
