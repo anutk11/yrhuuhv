@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 const JoinGame = () => {
   const navigate = useNavigate();
@@ -12,8 +12,9 @@ const JoinGame = () => {
   const [roomCode, setRoomCode] = useState(prefilledCode);
 
   const handleJoin = () => {
-    if (roomCode.trim()) {
-      navigate(`/lobby/${roomCode.trim().toUpperCase()}`);
+    const code = roomCode.replace(/\D/g, "").slice(0, 6);
+    if (/^\d{5,6}$/.test(code)) {
+      navigate(`/lobby/${code}`);
     }
   };
 
@@ -29,7 +30,7 @@ const JoinGame = () => {
           onClick={() => navigate("/")}
           className="text-muted-foreground hover:text-foreground mb-6 flex items-center gap-2 text-sm"
         >
-          <ArrowLeft className="w-4 h-4" />
+          <ArrowRight className="w-4 h-4" />
           חזרה
         </button>
 
@@ -43,10 +44,10 @@ const JoinGame = () => {
             <label className="text-sm text-muted-foreground mb-1 block">קוד חדר</label>
             <Input
               value={roomCode}
-              onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-              placeholder="12345"
+              onChange={(e) => setRoomCode(e.target.value.replace(/\\D/g, "").slice(0, 6))}
+              placeholder="123456"
               className="text-center text-2xl font-display tracking-[0.3em] h-14 bg-secondary border-border"
-              maxLength={5}
+              maxLength={6}\n              inputMode="numeric"\n              pattern="[0-9]*"\n              autoComplete="one-time-code"
               onKeyDown={(e) => e.key === "Enter" && handleJoin()}
             />
           </div>
@@ -54,7 +55,7 @@ const JoinGame = () => {
             variant="neon"
             className="w-full h-12 text-lg"
             onClick={handleJoin}
-            disabled={!roomCode.trim()}
+            disabled={!/^\\d{5,6}$/.test(roomCode)}
           >
             הצטרף!
           </Button>
