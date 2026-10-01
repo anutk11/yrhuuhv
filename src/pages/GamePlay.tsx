@@ -15,7 +15,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useGameAudio } from "@/hooks/useGameAudio";
 import { createPlayerState, type PlayerGameState } from "@/lib/scoring";
 import { supabase } from "@/integrations/supabase/client";
-import { getNextPhaseTransition, getPhaseDuration, getReadingTime, type GamePhase } from "@/lib/gamePhases";
+import { getPhaseDuration, type GamePhase } from "@/lib/gamePhases";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const GamePlay = () => {
   const navigate = useNavigate();
@@ -32,26 +36,23 @@ const GamePlay = () => {
     currentQuestionIndex,
     myAnswer,
     loading,
+    loadError,
+    reloadAll,
     submitAnswer,
     rewindQuestion,
     setGameStatus,
     fetchRoom,
+    fetchLeaderboard,
   } = useGameSync(roomId);
 
   const [lastScoreGain, setLastScoreGain] = useState(0);
   const [lastCorrect, setLastCorrect] = useState<boolean | null>(null);
   const [surveyVotes, setSurveyVotes] = useState<number[]>([]);
-  const [localPaused, setLocalPaused] = useState(false);
+  const [leaderboardRows, setLeaderboardRows] = useState<Array<{ user_id: string; display_name: string; score: number; rank: number; total_players: number; is_me: boolean }>>([]);
   const [now, setNow] = useState(() => Date.now());
-  const isPaused = room?.status === "paused" || localPaused;
-  const phaseTransitionKeyRef = useRef<string | null>(null);
-  const isSyncingPhaseRef = useRef(false);
-
-  // Sync localPaused with room status from realtime
-  useEffect(() => {
-    if (room?.status === "playing") setLocalPaused(false);
-    if (room?.status === "paused") setLocalPaused(true);
-  }, [room?.status]);
+  const [serverOffsetMs, setServerOffsetMs] = useState(0);
+  const [exitDialogOpen, setExitDialogOpen] = useState(false);
+  const isPaused = room?.status === "paused";
 
   const isHost = user?.id === room?.host_id;
   const phase = (room?.current_phase || (currentQuestionIndex >= 0 ? "reading" : "idle")) as GamePhase;
@@ -72,62 +73,31 @@ const GamePlay = () => {
     isFinished: room?.status === "finished",
   });
   const timeLeft = useMemo(() => {
-    if (!room) return 0;
-    if (phase === "idle") return 0;
+    if (!room || phase === "idle") return 0;
+    if (room.phase_ends_at) {
+      return Math.max(0, Math.ceil((new Date(room.phase_ends_at).getTime() - (now + serverOffsetMs)) / 1000));
+    }
     if (!room.phase_started_at) return totalTime;
-
     const endAt = new Date(room.phase_started_at).getTime() + totalTime * 1000;
-    return Math.max(0, Math.ceil((endAt - now) / 1000));
-  }, [room, phase, totalTime, now]);
+    return Math.max(0, Math.ceil((endAt - (now + serverOffsetMs)) / 1000));
+  }, [room, phase, totalTime, now, serverOffsetMs]);
 
   const fetchSurveyVotes = useCallback(async () => {
     if (!currentQuestion || !roomId) return;
-    const { data, error } = await supabase.rpc("get_question_answer_stats", {
+    const { data, error } = await supabase.rpc("get_answer_counts" as any, {
       _room_id: roomId,
       _question_id: currentQuestion.id,
     });
-    if (error || !data) return;
-    const row = Array.isArray(data) ? data[0] : data;
-    const counts = Array.isArray(row?.vote_counts)
-      ? row.vote_counts.map((n: unknown) => Number(n) || 0)
-      : [];
-    setSurveyVotes(currentQuestion.options.map((_, i) => counts[i] ?? 0));
-  }, [currentQuestion, roomId]);
-
-  const syncPhase = useCallback(async (forcedPhase?: GamePhase, forcedQuestionIndex?: number) => {
-    if (!roomId || !room || isSyncingPhaseRef.current) return false;
-    if (user?.id !== room.host_id) return false;
-
-    const expectedPhase = forcedPhase ?? phase;
-    const expectedQuestionIndex = forcedQuestionIndex ?? currentQuestionIndex;
-    const transition = getNextPhaseTransition({
-      currentPhase: expectedPhase,
-      currentQuestionIndex: expectedQuestionIndex,
-      questions,
-      settings: room.settings,
-    });
-
-    if (!transition) return false;
-
-    isSyncingPhaseRef.current = true;
-    try {
-      const { data, error } = await supabase.rpc("sync_room_phase", {
-        _room_id: roomId,
-        _expected_question_index: expectedQuestionIndex,
-        _expected_phase: expectedPhase,
-        _next_phase: transition.nextPhase,
-        _phase_duration_seconds: transition.duration,
-        _next_question_index: transition.nextQuestionIndex ?? null,
-        _next_status: transition.nextStatus ?? null,
-      });
-
-      if (error) return false;
-      await fetchRoom();
-      return !!data;
-    } finally {
-      isSyncingPhaseRef.current = false;
+    if (error) return;
+    const counts = Array(currentQuestion.options.length).fill(0) as number[];
+    for (const row of Array.isArray(data) ? data : []) {
+      const index = Number((row as any).selected_index);
+      if (Number.isInteger(index) && index >= 0 && index < counts.length) {
+        counts[index] = Number((row as any).count ?? 0);
+      }
     }
-  }, [roomId, room, phase, currentQuestionIndex, questions, fetchRoom, user?.id]);
+    setSurveyVotes(counts);
+  }, [currentQuestion, roomId]);
 
   useEffect(() => {
     if (currentQuestionIndex >= 0 && currentQuestion) {
@@ -153,36 +123,29 @@ const GamePlay = () => {
   }, [phase, fetchSurveyVotes]);
 
   useEffect(() => {
+    let alive = true;
+    const syncServerClock = async () => {
+      const { data } = await supabase.rpc("server_now" as any);
+      const serverNow = Array.isArray(data) ? data[0] : data;
+      if (alive && serverNow) setServerOffsetMs(new Date(serverNow as string).getTime() - Date.now());
+    };
+    void syncServerClock();
+
     const tick = () => setNow(Date.now());
     tick();
-
     const timer = window.setInterval(tick, 250);
+    const refreshClock = window.setInterval(() => void syncServerClock(), 60000);
     window.addEventListener("focus", tick);
     document.addEventListener("visibilitychange", tick);
 
     return () => {
+      alive = false;
       window.clearInterval(timer);
+      window.clearInterval(refreshClock);
       window.removeEventListener("focus", tick);
       document.removeEventListener("visibilitychange", tick);
     };
   }, []);
-
-  useEffect(() => {
-    phaseTransitionKeyRef.current = null;
-  }, [room?.current_question_index, room?.current_phase, room?.phase_started_at, room?.status]);
-
-  useEffect(() => {
-    if (!room || !currentQuestion || currentQuestionIndex < 0 || isPaused || room.status !== "playing") return;
-    if (phase === "reading" && currentQuestion.mediaType === "video" && currentQuestion.mediaUrl) return;
-    if (timeLeft > 0) return;
-    if (!isHost) return; // Only host drives phase transitions
-
-    const transitionKey = `${room.current_question_index}:${room.current_phase}:${room.phase_started_at}`;
-    if (phaseTransitionKeyRef.current === transitionKey) return;
-
-    phaseTransitionKeyRef.current = transitionKey;
-    void syncPhase();
-  }, [room, currentQuestion, currentQuestionIndex, isPaused, phase, timeLeft, syncPhase, isHost]);
 
   useEffect(() => {
     if (room?.status === "finished" && currentQuestionIndex >= 0) {
@@ -191,22 +154,28 @@ const GamePlay = () => {
   }, [room?.status, currentQuestionIndex, navigate, roomId]);
 
   // Handle video end - move from reading to answering
-  const handleVideoEnd = useCallback(() => {
-    if (phase === "reading") {
-      void syncPhase();
-    }
-  }, [phase, syncPhase]);
+  const handleVideoEnd = useCallback(async () => {
+    if (phase !== "reading" || !roomId) return;
+    await supabase.rpc("video_ended" as any, { _room_id: roomId });
+  }, [phase, roomId]);
 
   const handleAnswer = async (index: number) => {
     if ((phase !== "answering" && phase !== "reading") || myAnswer !== null || isObserverMode || isPaused) return;
-    const score = await submitAnswer(index);
-    if (score !== undefined) {
-      setLastScoreGain(score);
-      const isCorrect = currentQuestion?.type === "trivia" && index === currentQuestion.correctIndex;
-      const correctResult = currentQuestion?.type === "survey" ? null : isCorrect;
-      setLastCorrect(correctResult);
+    const result = await submitAnswer(index);
+    if (result !== undefined) {
+      setLastScoreGain(result.score);
+      setLastCorrect(result.isCorrect);
     }
   };
+
+  useEffect(() => {
+    if (phase !== "leaderboard" || !roomId) return;
+    let alive = true;
+    void fetchLeaderboard(10).then((rows) => {
+      if (alive) setLeaderboardRows(rows);
+    });
+    return () => { alive = false; };
+  }, [phase, roomId, fetchLeaderboard]);
 
   const answerVariants = ["answer-red", "answer-blue", "answer-green", "answer-orange"] as const;
 
@@ -219,8 +188,22 @@ const GamePlay = () => {
 
   if (loading || !room) {
     return (
-      <div className="min-h-screen gradient-hero flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen gradient-hero flex items-center justify-center px-4">
+        <div className="text-center space-y-4">
+          {loadError ? (
+            <>
+              <p className="text-destructive font-display">{loadError}</p>
+              <button
+                onClick={() => void reloadAll()}
+                className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-5 py-3 rounded-xl font-display"
+              >
+                נסה שוב
+              </button>
+            </>
+          ) : (
+            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" role="status" aria-label="טוען משחק" />
+          )}
+        </div>
       </div>
     );
   }
@@ -239,9 +222,10 @@ const GamePlay = () => {
           {isHost && (
             <button
               onClick={async () => {
-                setLocalPaused(false);
-                await syncPhase("idle", -1);
-                    await fetchRoom();
+                if (!roomId) return;
+                const { error } = await supabase.rpc("host_start_game" as any, { _room_id: roomId });
+                if (error) return;
+                await fetchRoom();
               }}
               className="bg-primary text-primary-foreground px-6 py-3 rounded-xl font-display"
             >
@@ -272,16 +256,10 @@ const GamePlay = () => {
                     if (targetIndex < 0 || !roomId) return;
 
                     await rewindQuestion(targetIndex);
-                    await supabase.from("game_rooms").update({
-                      current_phase: "reading",
-                      phase_started_at: new Date().toISOString(),
-                      phase_duration_seconds: getReadingTime(questions[targetIndex]),
-                      status: "playing",
-                    }).eq("id", roomId);
-                    await fetchRoom();
                   }}
                   disabled={currentQuestionIndex <= 0}
                   className="flex items-center gap-1 px-2 py-1 rounded-lg bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  aria-label="שאלה קודמת"
                   title="שאלה קודמת (איפוס)"
                 >
                   <ChevronRight className="w-3.5 h-3.5" />
@@ -298,6 +276,7 @@ const GamePlay = () => {
                   }}
                   disabled={currentQuestionIndex >= questions.length - 1}
                   className="flex items-center gap-1 px-2 py-1 rounded-lg bg-secondary text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  aria-label="שאלה הבאה"
                   title="שאלה הבאה"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
@@ -307,17 +286,7 @@ const GamePlay = () => {
             {/* Pause button */}
             <button
               onClick={async () => {
-                const newPaused = !isPaused;
-                setLocalPaused(newPaused);
-                await setGameStatus(newPaused ? "paused" : "playing", newPaused
-                  ? {
-                      phase_started_at: null,
-                      phase_duration_seconds: timeLeft,
-                    }
-                  : {
-                      phase_started_at: new Date().toISOString(),
-                      phase_duration_seconds: Math.max(timeLeft, 1),
-                    });
+                await setGameStatus(isPaused ? "playing" : "paused");
               }}
               className={`flex items-center gap-1.5 px-3 py-1 rounded-lg transition-colors ${
                 isPaused ? "bg-primary/20 text-primary" : "bg-secondary text-muted-foreground hover:text-foreground"
@@ -334,12 +303,9 @@ const GamePlay = () => {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => {
-              if (confirm("בטוח שברצונך לצאת מהמשחק?")) {
-                navigate(isHost ? `/admin?room=${roomId}` : "/");
-              }
-            }}
-            className="text-muted-foreground hover:text-destructive transition-colors"
+            onClick={() => setExitDialogOpen(true)}
+            aria-label="יציאה מהמשחק"
+            className="text-muted-foreground hover:text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-md"
             title="יציאה"
           >
             <LogOut className="w-4 h-4" />
@@ -374,7 +340,7 @@ const GamePlay = () => {
       {/* Content */}
       {/* Floating answer stats on left side */}
       {currentQuestion && (phase === "answering" || phase === "result" || phase === "survey-result") && (
-        <div className="fixed left-4 top-1/2 -translate-y-1/2 z-40 bg-card/90 backdrop-blur-md border border-border rounded-2xl p-4 shadow-lg min-w-[120px]">
+        <div className="w-full max-w-md mb-3 sm:mb-0 sm:fixed sm:left-4 sm:top-1/2 sm:-translate-y-1/2 z-40 bg-card/90 backdrop-blur-md border border-border rounded-2xl p-3 sm:p-4 shadow-lg sm:min-w-[120px]">
           <AnswerStats
             questionId={currentQuestion.id}
             roomId={roomId}
@@ -394,11 +360,7 @@ const GamePlay = () => {
               {isHost && (
                 <button
                   onClick={async () => {
-                    setLocalPaused(false);
-                    await setGameStatus("playing", {
-                      phase_started_at: new Date().toISOString(),
-                      phase_duration_seconds: Math.max(timeLeft, 1),
-                    });
+                    await setGameStatus("playing");
                   }}
                   className="bg-primary text-primary-foreground px-6 py-2 rounded-xl font-display text-sm"
                 >
@@ -470,6 +432,19 @@ const GamePlay = () => {
           )}
         </AnimatePresence>
       </div>
+
+      <AlertDialog open={exitDialogOpen} onOpenChange={setExitDialogOpen}>
+        <AlertDialogContent dir="rtl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>לצאת מהמשחק?</AlertDialogTitle>
+            <AlertDialogDescription>המשחק ימשיך עבור שאר המשתתפים. אפשר לחזור אליו דרך החדר המתאים.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>ביטול</AlertDialogCancel>
+            <AlertDialogAction onClick={() => navigate(isHost ? `/admin?room=${roomId}` : "/")}>יציאה</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
